@@ -1,0 +1,22 @@
+node_modules/
+dist/
+dist-ssr/
+.env
+.env.local
+*.local
+
+# Editor/OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# PWA build artifacts
+dev-dist/
+
+# Credentials
+gcloud-credentials.json
+*.pem
