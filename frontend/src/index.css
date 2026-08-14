@@ -194,6 +194,12 @@ code {
   letter-spacing: 0.02em;
   color: var(--text-h);
 }
+.library-card-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
 .library-card-info {
   margin-top: 0.6rem;
   display: flex;
@@ -412,6 +418,23 @@ code {
   align-items: center;
   font-size: 0.85rem;
   margin: 0.5rem 0;
+}
+.merge-button {
+  font: inherit;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+.merge-button:hover:not(:disabled) {
+  border-color: var(--accent-border);
+}
+.merge-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .document-insights {

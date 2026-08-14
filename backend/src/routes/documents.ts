@@ -1,10 +1,10 @@
-import { Router } from 'express'
+import { Router, type Request, type Response } from 'express'
 import multer from 'multer'
 import path from 'node:path'
 import { deleteDocument, getDocument, listDocuments, updateLastPosition } from '../db/documents.js'
 import { getChunksForDocument } from '../db/chunks.js'
 import { getVoice } from '../db/voices.js'
-import { deleteObject, getObjectBuffer } from '../storage/index.js'
+import { deleteObject, getObjectBuffer, putObject } from '../storage/index.js'
 import { extractDocxText, extractEpubText, extractTxtText } from '../services/textExtraction.js'
 import { extractPdfLayout } from '../services/pdfLayout.js'
 import { ingestDocument, NoTextExtractedError } from '../services/documentPipeline.js'
@@ -95,7 +95,21 @@ documentsRouter.post('/', upload.single('file'), async (req, res) => {
 
 documentsRouter.get('/', async (_req, res) => {
   const documents = await listDocuments()
-  res.json({ documents })
+  // N+1, but this is a single-user app with a handful of documents at most —
+  // the Studio API has no aggregate/join query, so per-document chunk counts
+  // (used to tell "first chunk ready" apart from "fully generated" in the
+  // Library list) have to be fetched individually.
+  const withChunkCounts = await Promise.all(
+    documents.map(async (document) => {
+      const chunks = await getChunksForDocument(document.id)
+      return {
+        ...document,
+        chunksTotal: chunks.length,
+        chunksReady: chunks.filter((c) => c.status === 'ready').length,
+      }
+    }),
+  )
+  res.json({ documents: withChunkCounts })
 })
 
 documentsRouter.get('/:id', async (req, res) => {
@@ -111,7 +125,11 @@ documentsRouter.get('/:id', async (req, res) => {
   ])
 
   res.json({
-    document,
+    document: {
+      ...document,
+      chunksTotal: chunks.length,
+      chunksReady: chunks.filter((c) => c.status === 'ready').length,
+    },
     voice,
     chunks: chunks.map((chunk) => ({
       id: chunk.id,
@@ -144,6 +162,39 @@ documentsRouter.get('/:id/original', async (req, res) => {
   }
 })
 
+/**
+ * Serves an audio buffer with Range support — shared by the per-chunk and
+ * merged-audio routes. <audio> elements need this to seek: without it, the
+ * browser marks the resource as unseekable after its initial probe request
+ * and silently drops any later `currentTime` assignment (tap-to-jump lands
+ * back at 0 instead of the tapped word).
+ */
+function sendAudioBuffer(req: Request, res: Response, buffer: Buffer): void {
+  res.setHeader('Content-Type', 'audio/mpeg')
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+  res.setHeader('Accept-Ranges', 'bytes')
+
+  const range = req.headers.range
+  if (!range) {
+    res.setHeader('Content-Length', buffer.length)
+    res.send(buffer)
+    return
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range)
+  const start = match?.[1] ? Number(match[1]) : 0
+  const end = match?.[2] ? Number(match[2]) : buffer.length - 1
+  if (!match || start > end || end >= buffer.length) {
+    res.status(416).setHeader('Content-Range', `bytes */${buffer.length}`).end()
+    return
+  }
+
+  res.status(206)
+  res.setHeader('Content-Range', `bytes ${start}-${end}/${buffer.length}`)
+  res.setHeader('Content-Length', end - start + 1)
+  res.send(buffer.subarray(start, end + 1))
+}
+
 documentsRouter.get('/:id/chunks/:sequenceIndex/audio', async (req, res) => {
   const document = await getDocument(req.params.id)
   if (!document) {
@@ -160,36 +211,68 @@ documentsRouter.get('/:id/chunks/:sequenceIndex/audio', async (req, res) => {
 
   try {
     const buffer = await getObjectBuffer(chunk.audioKey)
-    res.setHeader('Content-Type', 'audio/mpeg')
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
-    // <audio> elements need Range support to seek — without it, the browser
-    // marks the resource as unseekable after its initial probe request and
-    // silently drops any later `currentTime` assignment (tap-to-jump lands
-    // back at 0 instead of the tapped word).
-    res.setHeader('Accept-Ranges', 'bytes')
-
-    const range = req.headers.range
-    if (!range) {
-      res.setHeader('Content-Length', buffer.length)
-      res.send(buffer)
-      return
-    }
-
-    const match = /^bytes=(\d*)-(\d*)$/.exec(range)
-    const start = match?.[1] ? Number(match[1]) : 0
-    const end = match?.[2] ? Number(match[2]) : buffer.length - 1
-    if (!match || start > end || end >= buffer.length) {
-      res.status(416).setHeader('Content-Range', `bytes */${buffer.length}`).end()
-      return
-    }
-
-    res.status(206)
-    res.setHeader('Content-Range', `bytes ${start}-${end}/${buffer.length}`)
-    res.setHeader('Content-Length', end - start + 1)
-    res.send(buffer.subarray(start, end + 1))
+    sendAudioBuffer(req, res, buffer)
   } catch (err) {
     console.error('Failed to load chunk audio:', err)
     res.status(500).json({ error: 'Failed to load audio' })
+  }
+})
+
+function mergedAudioKeyFor(documentId: string): string {
+  return `audio/${documentId}/merged.mp3`
+}
+
+/**
+ * Concatenates every ready chunk's MP3 into one file so playback can cross
+ * section boundaries without the brief reload each chunk-swap causes today.
+ * Idempotent and doesn't touch ElevenLabs — it only stitches together audio
+ * that's already been generated, cached at a deterministic storage key so a
+ * repeat click (or an already-merged document) is a no-op.
+ */
+documentsRouter.post('/:id/merge', async (req, res) => {
+  const document = await getDocument(req.params.id)
+  if (!document) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  const chunks = await getChunksForDocument(document.id)
+  if (chunks.length === 0 || chunks.some((c) => c.status !== 'ready')) {
+    res.status(409).json({ error: 'All sections must finish generating before they can be merged.' })
+    return
+  }
+
+  const mergedKey = mergedAudioKeyFor(document.id)
+  try {
+    await getObjectBuffer(mergedKey)
+    res.json({ merged: true })
+    return
+  } catch {
+    // Not merged yet — fall through and generate it below.
+  }
+
+  try {
+    const buffers = await Promise.all(chunks.map((c) => getObjectBuffer(c.audioKey!)))
+    await putObject(mergedKey, Buffer.concat(buffers), 'audio/mpeg')
+    res.json({ merged: true })
+  } catch (err) {
+    console.error('Failed to merge chunk audio:', err)
+    res.status(500).json({ error: 'Failed to merge audio' })
+  }
+})
+
+documentsRouter.get('/:id/merged-audio', async (req, res) => {
+  const document = await getDocument(req.params.id)
+  if (!document) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  try {
+    const buffer = await getObjectBuffer(mergedAudioKeyFor(document.id))
+    sendAudioBuffer(req, res, buffer)
+  } catch {
+    res.status(404).json({ error: 'Merged audio not generated yet' })
   }
 })
 
@@ -206,7 +289,7 @@ documentsRouter.delete('/:id', async (req, res) => {
   // Best-effort: a storage object already missing (or a transient bucket
   // error) shouldn't block removing the document itself.
   await Promise.all(
-    [document.originalFileKey, ...audioKeys].map((key) =>
+    [document.originalFileKey, mergedAudioKeyFor(document.id), ...audioKeys].map((key) =>
       deleteObject(key).catch((err) => console.error(`Failed to delete storage object ${key}:`, err)),
     ),
   )

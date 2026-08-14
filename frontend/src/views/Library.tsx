@@ -1,12 +1,19 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { deleteDocument, listDocuments } from '../api/client'
 import type { Document } from '../api/types'
 
+// pdfjs-dist is a large dependency (~600kB) — load it only when a PDF tile
+// actually needs to render a thumbnail, not on every Library visit.
+const PdfThumbnail = lazy(() => import('../components/PdfThumbnail'))
+
 function statusLabel(document: Document): string {
   if (document.status === 'processing') return 'Processing…'
   if (document.status === 'error') return `Error: ${document.errorMessage ?? 'unknown'}`
-  return document.lastPosition ? 'Reading in progress' : 'Ready'
+  if (document.chunksTotal > 0 && document.chunksReady < document.chunksTotal) {
+    return `Generating audio… ${document.chunksReady} of ${document.chunksTotal}`
+  }
+  return 'Done'
 }
 
 function statusClass(document: Document): string {
@@ -57,7 +64,13 @@ export default function Library() {
         {documents?.map((doc) => (
           <div className="library-card" key={doc.id}>
             <Link to={`/reader/${doc.id}`} className={`library-card-tile status-${statusClass(doc)}`}>
-              <span className="library-card-tile-type">{doc.sourceType.toUpperCase()}</span>
+              {doc.sourceType === 'pdf' ? (
+                <Suspense fallback={<span className="library-card-tile-type">PDF</span>}>
+                  <PdfThumbnail documentId={doc.id} />
+                </Suspense>
+              ) : (
+                <span className="library-card-tile-type">{doc.sourceType.toUpperCase()}</span>
+              )}
             </Link>
             <div className="library-card-info">
               <Link to={`/reader/${doc.id}`} className="library-card-title">

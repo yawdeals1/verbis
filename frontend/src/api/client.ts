@@ -117,3 +117,11 @@ export function chunkAudioUrl(documentId: string, sequenceIndex: number): string
 export function originalFileUrl(documentId: string): string {
   return `${API_BASE_URL}/documents/${documentId}/original`
 }
+
+export function mergedAudioUrl(documentId: string): string {
+  return `${API_BASE_URL}/documents/${documentId}/merged-audio`
+}
+
+export function mergeDocumentAudio(documentId: string) {
+  return request<{ merged: true }>(`/documents/${documentId}/merge`, { method: 'POST' })
+}

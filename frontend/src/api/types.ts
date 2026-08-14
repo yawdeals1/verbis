@@ -42,6 +42,8 @@ export interface Document {
   /** PDF-only — null for other source types and for PDFs imported before this existed. */
   pageLayout: PdfLayout | null
   createdAt: string
+  chunksTotal: number
+  chunksReady: number
 }
 
 export interface WordTiming {
