@@ -10,15 +10,38 @@
 # absolute URL: the frontend never needs to know the deployment's public
 # domain, in dev or in prod.
 #
-# Env vars come from Deploro's per-project VPS env (`deploro vps set-env`),
-# written into a `.env` file alongside this compose file on deploy — see
-# PRODUCT_PLAN.md for the full list required.
+# Env vars come from Deploro's per-project VPS env (`deploro vps set-env`).
+# Listed explicitly per-key below (${VAR} interpolation from the .env
+# Deploro writes alongside this file) rather than `env_file: .env` — the
+# latter failed on the VPS runner with a path-not-found error even though
+# the same vars were set. See PRODUCT_PLAN.md for the full list required.
 
 services:
   backend:
     build:
       context: ./backend
-    env_file: .env
+    environment:
+      PORT: ${PORT}
+      NODE_ENV: ${NODE_ENV}
+      DEPLORO_API_URL: ${DEPLORO_API_URL}
+      DEPLORO_API_TOKEN: ${DEPLORO_API_TOKEN}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
+      GOOGLE_APPLICATION_CREDENTIALS_JSON: ${GOOGLE_APPLICATION_CREDENTIALS_JSON}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      LOCAL_STORAGE_DIR: ${LOCAL_STORAGE_DIR}
+    volumes:
+      # Local-disk storage fallback (used while S3_* is unset) needs to
+      # survive redeploys/rebuilds — without this, every `vps deploy`
+      # silently wipes every previously uploaded document and generated
+      # audio file, since the container filesystem is otherwise ephemeral.
+      - verbis-storage:/app/storage
     restart: unless-stopped
 
   frontend:
@@ -31,3 +54,6 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+
+volumes:
+  verbis-storage:
