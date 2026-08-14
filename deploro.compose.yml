@@ -1,0 +1,31 @@
+# Deploy stack for `deploro vps deploy` — distinct from docker-compose.yml,
+# which is local-dev-only (a bare Postgres container). This file builds and
+# runs the actual app: the Express API and the built static PWA behind
+# nginx, as two services in the VPS compute stack.
+#
+# Env vars come from Deploro's per-project VPS env (`deploro vps set-env` /
+# `deploro vps database create`), written into a `.env` file alongside this
+# compose file on deploy — see PRODUCT_PLAN.md for the full list required.
+
+services:
+  backend:
+    build:
+      context: ./backend
+    env_file: .env
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Vite bakes this in at build time — must be the backend's
+        # publicly-reachable URL (browsers call it directly), not the
+        # internal container hostname.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    depends_on:
+      - backend

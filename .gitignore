@@ -17,6 +17,9 @@ npm-debug.log*
 # PWA build artifacts
 dev-dist/
 
+# Local disk fallback for object storage (used when S3_* env vars are unset)
+backend/storage/
+
 # Credentials
 gcloud-credentials.json
 *.pem

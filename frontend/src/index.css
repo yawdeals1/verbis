@@ -50,6 +50,32 @@
   }
 }
 
+/* Manual theme override (Phase 3 reading theme toggle) — wins over the
+   prefers-color-scheme default in both directions. */
+:root[data-theme='dark'] {
+  --text: #9ca3af;
+  --text-h: #f3f4f6;
+  --bg: #16171d;
+  --border: #2e303a;
+  --code-bg: #1f2028;
+  --accent: #c084fc;
+  --accent-bg: rgba(192, 132, 252, 0.15);
+  --accent-border: rgba(192, 132, 252, 0.5);
+  --social-bg: rgba(47, 48, 58, 0.5);
+}
+
+:root[data-theme='light'] {
+  --text: #6b6375;
+  --text-h: #08060d;
+  --bg: #fff;
+  --border: #e5e4e7;
+  --code-bg: #f4f3ec;
+  --accent: #aa3bff;
+  --accent-bg: rgba(170, 59, 255, 0.1);
+  --accent-border: rgba(170, 59, 255, 0.5);
+  --social-bg: rgba(244, 243, 236, 0.5);
+}
+
 #root {
   width: 1126px;
   max-width: 100%;
@@ -108,4 +134,112 @@ code {
   line-height: 135%;
   padding: 4px 8px;
   background: var(--code-bg);
+}
+
+/* App shell */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 2px 8px;
+}
+
+/* Library */
+.library-list {
+  list-style: none;
+  padding: 0;
+  text-align: left;
+}
+.library-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.library-item-meta {
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+/* Reader */
+.reader {
+  text-align: left;
+}
+.reader-meta {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.chunk-text {
+  min-height: 30vh;
+  line-height: 1.8;
+  font-size: 1.1rem;
+  padding: 1rem 0;
+}
+.word {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.word:hover {
+  background: var(--code-bg);
+}
+.word-active,
+.word.sentence-active {
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+/* Playback bar */
+.playback-bar {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+.playback-bar input[type='range'] {
+  width: 100%;
+}
+.playback-bar-time {
+  font-size: 0.8rem;
+  color: var(--text);
+}
+.playback-bar-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+/* Reader settings (highlight granularity) */
+.reader-settings {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  font-size: 0.85rem;
+  margin: 0.5rem 0;
+}
+
+.document-insights {
+  margin: 1.5rem 0;
+  text-align: left;
+}
+.document-insights form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }

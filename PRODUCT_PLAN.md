@@ -54,12 +54,14 @@ Chunking is generation-time (first chunk generated immediately so playback start
 
 ## 4. Data Model
 
-Carried over from the PRD, storage fields pointed at the S3-compatible bucket:
+Implemented in `backend/src/db/schema.sql` (source of truth — keep this section in sync with it):
 
-- **documents**: `id`, `title`, `source_type` (`pdf` | `docx` | `scan`), `original_file_key` (bucket key, not a generic URL), `created_at`, `last_position`, `status` (`processing` | `ready` | `error`)
-- **chunks**: `id`, `document_id`, `sequence_index`, `text_content`, `audio_key` (bucket key), `timing_data` (JSON: char-range-to-timestamp map, plus derived word boundaries), `duration_seconds`
+- **documents**: `id`, `title`, `source_type` (`pdf` | `docx` | `txt` | `epub` | `scan` | `url`), `original_file_key` (bucket key, not a generic URL), `voice_id` (FK → voices), `status` (`processing` | `ready` | `error`), `error_message`, `last_position` (JSON: `{chunkSequenceIndex, timeSeconds}`), `summary` (Phase 4, cached on first generation), `created_at`
+- **chunks**: `id`, `document_id`, `sequence_index`, `text_content`, `status` (`pending` | `ready` | `error`, tracks per-chunk background generation), `audio_key` (bucket key), `timing_data` (JSON: `{words: [{word, charStart, charEnd, startMs, endMs}]}`), `duration_seconds`
 - **voices**: `id`, `provider` (`elevenlabs`), `provider_voice_id`, `display_name`
-- **reading_sessions** (optional, for history beyond "last position"): `id`, `document_id`, `chunk_id`, `word_index`, `updated_at`
+- **reading_sessions**: defined in the schema for future history-beyond-last-position use; not yet written to by any route — `documents.last_position` covers resume for v1.
+
+Object storage note: `putObject`/`getObjectBuffer` (`backend/src/storage/index.ts`) fall back to local disk under `backend/storage/` when `S3_*` env vars are unset, so the app runs before Deploro object storage is provisioned. Same idea for the database — `docker-compose.yml` at the repo root brings up a local Postgres for development ahead of the Deploro instance.
 
 ## 5. Build Phases
 
@@ -70,19 +72,27 @@ PDF/DOCX import and text extraction, ElevenLabs TTS integration with character-l
 Camera/photo capture in the PWA, Google Cloud Vision OCR pipeline, feeding scanned text into the same reader flow as PDF/DOCX (same chunking, TTS, highlighting code path).
 
 **Phase 3 — Polish and offline**
-EPUB/TXT import, offline audio caching (service worker + cached audio/timing per document), reading themes, tap-to-jump refinement.
+EPUB/TXT import, web page import via URL (Readability-based extraction), offline audio caching (service worker + cached audio/timing per document), dark/light/system reading theme, adjustable highlight granularity (word/sentence/off).
 
 **Phase 4 — Optional expansion**
-Summarization, lightweight document Q&A, multi-device sync — only if the tool earns its keep past personal use.
+Summarization and lightweight document Q&A are implemented (local Ollama model — `gemma4` by default, no API key or per-token billing, request-triggered, summary cached on the document row). Multi-device sync is deliberately **not** implemented — it would require accounts/auth, which conflicts with the no-auth single-user architecture and is explicitly framed as optional in the PRD (§5, §29 non-goals).
+
+### Implementation status
+
+All of Phase 1–4 above is built (`backend/src/`, `frontend/src/`) except multi-device sync (see note above). What's still required before it runs against real infrastructure:
+
+- Fill in `backend/.env` (copied from `.env.example`): `ELEVENLABS_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, and either `DATABASE_URL` pointed at a running Postgres or leave `S3_*` blank for local disk storage.
+- Install [Ollama](https://ollama.com), run `ollama pull gemma4` (or a variant: `gemma4:e2b`/`e4b`/`26b`/`31b`), and `ollama serve` — `OLLAMA_BASE_URL`/`OLLAMA_MODEL` in `.env` default to `http://localhost:11434`/`gemma4`.
+- Bring up Postgres — `docker compose up -d` at the repo root (local dev) or point `DATABASE_URL` at Deploro — then run `npm run migrate` in `backend/`.
+- Everything was verified via `tsc --noEmit`/`tsc -b` on both projects, a clean `vite build` (PWA/workbox config), and isolated logic tests (chunking, ElevenLabs word-boundary derivation, sentence grouping) run without any live API keys or database. Routes that need Postgres, ElevenLabs, Cloud Vision, or Ollama have **not** been exercised end-to-end against real provider responses — do that once keys are filled in and Ollama is running.
 
 ## 6. Environment/Secrets Checklist
 
-Before Phase 1 work starts:
-
-- [ ] ElevenLabs API key
-- [ ] Google Cloud Vision service account credentials (needed by Phase 2, but worth provisioning early to prototype OCR accuracy per the risk below)
-- [ ] Deploro Postgres instance provisioned
-- [ ] S3-compatible bucket provisioned (e.g. on Hetzner) for original files + generated audio
+- [ ] ElevenLabs API key → `backend/.env` `ELEVENLABS_API_KEY`
+- [ ] Google Cloud Vision service account credentials → `GOOGLE_APPLICATION_CREDENTIALS` (path to the JSON key)
+- [ ] Ollama running locally with `gemma4` pulled → `OLLAMA_BASE_URL`/`OLLAMA_MODEL` (Phase 4 summarize/Q&A, no API key)
+- [ ] Postgres reachable → `DATABASE_URL` (local: `docker compose up -d` + `npm run migrate`; production: Deploro connection string)
+- [ ] S3-compatible bucket (optional until then) → `S3_ENDPOINT`/`S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`; leave blank to use local disk storage under `backend/storage/` in the meantime
 - [ ] Netlify site created and linked for the frontend build
 - [ ] Deploro Express API deployment target set up, with the above secrets injected server-side only (never shipped to the PWA client)
 
