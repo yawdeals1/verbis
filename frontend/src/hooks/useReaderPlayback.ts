@@ -113,6 +113,11 @@ export function useReaderPlayback(documentId: string | undefined) {
     setWordIndex(null)
   }, [detail])
 
+  const goToPrevChunk = useCallback(() => {
+    setChunkIndex((idx) => Math.max(idx - 1, 0))
+    setWordIndex(null)
+  }, [])
+
   const handleEnded = useCallback(() => {
     if (!detail) return
     if (chunkIndex < detail.chunks.length - 1) {
@@ -137,28 +142,71 @@ export function useReaderPlayback(documentId: string | undefined) {
     else play()
   }, [isPlaying, play, pause])
 
-  const skip = useCallback((deltaSeconds: number) => {
-    const audio = audioRef.current
-    if (!audio) return
-    audio.currentTime = Math.max(0, Math.min(audio.duration || Infinity, audio.currentTime + deltaSeconds))
-  }, [])
+  /** Skip within the current chunk's audio, spilling into the next/previous chunk when the delta crosses a boundary. */
+  const skip = useCallback(
+    (deltaSeconds: number) => {
+      const audio = audioRef.current
+      if (!audio || !detail) return
+      const target = audio.currentTime + deltaSeconds
+
+      if (target < 0 && chunkIndex > 0) {
+        const prevChunk = detail.chunks[chunkIndex - 1]
+        if (prevChunk.status === 'ready' && prevChunk.durationSeconds !== null) {
+          pendingSeekSecondsRef.current = Math.max(0, prevChunk.durationSeconds + target)
+          setChunkIndex(chunkIndex - 1)
+          setWordIndex(null)
+          return
+        }
+      }
+
+      if (audio.duration && target > audio.duration && chunkIndex < detail.chunks.length - 1) {
+        const nextChunk = detail.chunks[chunkIndex + 1]
+        if (nextChunk.status === 'ready') {
+          pendingSeekSecondsRef.current = Math.max(0, target - audio.duration)
+          setChunkIndex(chunkIndex + 1)
+          setWordIndex(null)
+          return
+        }
+      }
+
+      audio.currentTime = Math.max(0, Math.min(audio.duration || Infinity, target))
+    },
+    [detail, chunkIndex],
+  )
 
   const setPlaybackRate = useCallback((rate: number) => {
     setPlaybackRateState(rate)
     if (audioRef.current) audioRef.current.playbackRate = rate
   }, [])
 
-  /** Tap-to-jump: resolve a tapped word to its timestamp and seek there (PRODUCT_PLAN.md §3). */
+  /**
+   * Tap-to-jump: resolve a tapped word to its timestamp and seek there
+   * (PRODUCT_PLAN.md §3). Words render across the whole document now, so a
+   * tap can target any ready chunk, not just the currently active one.
+   */
   const jumpToWord = useCallback(
-    (index: number) => {
+    (targetChunkIndex: number, wordIndex: number) => {
       const audio = audioRef.current
-      const word = currentChunk?.timingData?.words[index]
-      if (!audio || !word) return
-      audio.currentTime = word.startMs / 1000
-      setWordIndex(index)
-      play()
+      const chunk = detail?.chunks[targetChunkIndex]
+      const word = chunk?.timingData?.words[wordIndex]
+      if (!audio || !chunk || !word) return
+
+      const seekSeconds = word.startMs / 1000
+      if (targetChunkIndex === chunkIndex) {
+        audio.currentTime = seekSeconds
+        play()
+      } else {
+        // Audio src for the new chunk hasn't swapped in yet (that happens
+        // in the effect below once `chunkIndex` updates) — just flag intent
+        // to play and let it apply the pending seek once the new src loads,
+        // instead of calling audio.play() on the still-stale src here.
+        pendingSeekSecondsRef.current = seekSeconds
+        setChunkIndex(targetChunkIndex)
+        setIsPlaying(true)
+      }
+      setWordIndex(wordIndex)
     },
-    [currentChunk, play],
+    [detail, chunkIndex, play],
   )
 
   // Periodically persist reading position.
@@ -195,6 +243,6 @@ export function useReaderPlayback(documentId: string | undefined) {
     currentTime,
     duration,
     handlers: { handleLoadedMetadata, handleTimeUpdate, handleEnded },
-    actions: { play, pause, togglePlay, skip, setPlaybackRate, jumpToWord, goToNextChunk },
+    actions: { play, pause, togglePlay, skip, setPlaybackRate, jumpToWord, goToNextChunk, goToPrevChunk },
   }
 }

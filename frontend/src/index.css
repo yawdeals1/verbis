@@ -176,6 +176,9 @@ code {
 /* Reader */
 .reader {
   text-align: left;
+  max-width: 720px;
+  margin: 0 auto;
+  padding-bottom: 2rem;
 }
 .reader-meta {
   font-size: 0.85rem;
@@ -183,14 +186,36 @@ code {
 }
 .chunk-text {
   min-height: 30vh;
-  line-height: 1.8;
-  font-size: 1.1rem;
-  padding: 1rem 0;
+  line-height: 1.9;
+  font-size: 1.15rem;
+  font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+  padding: 1rem 0 3rem;
+}
+.chunk-text p {
+  margin: 0 0 1.35em;
+  text-align: left;
+}
+.chunk-block {
+  transition: opacity 0.2s ease;
+}
+.chunk-block-pending {
+  opacity: 0.45;
+}
+.chunk-block-error {
+  opacity: 0.6;
+  border-left: 2px solid #e05252;
+  padding-left: 0.75em;
+}
+.chunk-block-active {
+  border-left: 3px solid var(--accent-border);
+  padding-left: 0.75em;
+  margin-left: -0.75em;
 }
 .word {
   cursor: pointer;
   border-radius: 3px;
   padding: 0 1px;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 .word:hover {
   background: var(--code-bg);
@@ -199,6 +224,7 @@ code {
 .word.sentence-active {
   background: var(--accent-bg);
   color: var(--text-h);
+  font-weight: 600;
 }
 
 /* Playback bar */
@@ -211,17 +237,50 @@ code {
 }
 .playback-bar input[type='range'] {
   width: 100%;
+  accent-color: var(--accent);
 }
 .playback-bar-time {
   font-size: 0.8rem;
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 .playback-bar-controls {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  justify-content: center;
+  gap: 0.5rem;
   flex-wrap: wrap;
   margin-top: 0.5rem;
+}
+.playback-bar-controls button {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text-h);
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+.playback-bar-controls button:hover:not(:disabled) {
+  border-color: var(--accent-border);
+}
+.playback-bar-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.playback-bar-controls label {
+  margin-left: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.playback-bar-controls select {
+  font: inherit;
+  color: var(--text-h);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem 0.4rem;
 }
 
 /* Reader settings (highlight granularity) */

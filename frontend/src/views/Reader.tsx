@@ -80,7 +80,8 @@ export default function Reader() {
       </div>
 
       <ChunkText
-        chunk={currentChunk}
+        chunks={chunks}
+        activeChunkIndex={chunkIndex}
         activeWordIndex={wordIndex}
         granularity={granularity}
         onWordTap={actions.jumpToWord}
@@ -103,6 +104,8 @@ export default function Reader() {
         hasPrevChunk={chunkIndex > 0}
         onTogglePlay={actions.togglePlay}
         onSkip={actions.skip}
+        onPrevChunk={actions.goToPrevChunk}
+        onNextChunk={actions.goToNextChunk}
         onSeek={(seconds) => {
           if (audioRef.current) audioRef.current.currentTime = seconds
         }}

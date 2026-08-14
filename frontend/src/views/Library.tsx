@@ -6,7 +6,7 @@ import type { Document } from '../api/types'
 function statusLabel(document: Document): string {
   if (document.status === 'processing') return 'Processing…'
   if (document.status === 'error') return `Error: ${document.errorMessage ?? 'unknown'}`
-  return document.lastPosition ? 'In progress' : 'Not started'
+  return document.lastPosition ? 'Reading in progress' : 'Ready'
 }
 
 export default function Library() {

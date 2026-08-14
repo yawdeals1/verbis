@@ -9,6 +9,8 @@ interface Props {
   hasPrevChunk: boolean
   onTogglePlay: () => void
   onSkip: (deltaSeconds: number) => void
+  onPrevChunk: () => void
+  onNextChunk: () => void
   onSeek: (seconds: number) => void
   onSetPlaybackRate: (rate: number) => void
 }
@@ -25,8 +27,12 @@ export default function PlaybackBar({
   currentTime,
   duration,
   playbackRate,
+  hasNextChunk,
+  hasPrevChunk,
   onTogglePlay,
   onSkip,
+  onPrevChunk,
+  onNextChunk,
   onSeek,
   onSetPlaybackRate,
 }: Props) {
@@ -46,6 +52,9 @@ export default function PlaybackBar({
       </div>
 
       <div className="playback-bar-controls">
+        <button type="button" onClick={onPrevChunk} disabled={!hasPrevChunk} aria-label="Previous section">
+          ⏮ Section
+        </button>
         <button type="button" onClick={() => onSkip(-10)} aria-label="Rewind 10 seconds">
           ⏪ 10s
         </button>
@@ -54,6 +63,9 @@ export default function PlaybackBar({
         </button>
         <button type="button" onClick={() => onSkip(10)} aria-label="Skip forward 10 seconds">
           10s ⏩
+        </button>
+        <button type="button" onClick={onNextChunk} disabled={!hasNextChunk} aria-label="Next section">
+          Section ⏭
         </button>
 
         <label>

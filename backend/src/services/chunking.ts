@@ -47,17 +47,24 @@ export function splitIntoChunks(text: string, maxChars = MAX_CHUNK_CHARS): strin
   }
 
   for (const paragraph of paragraphs) {
+    let isFirstSentenceOfParagraph = true
     for (const rawSentence of splitIntoSentences(paragraph)) {
       const sentences = rawSentence.length > maxChars ? hardSplit(rawSentence, maxChars) : [rawSentence]
 
       for (const sentence of sentences) {
-        const candidate = current ? `${current} ${sentence}` : sentence
+        // A paragraph's first sentence joins prior content with a blank-line
+        // marker (kept in the chunk text itself) so the frontend can render
+        // paragraph breaks instead of one run-on wall of text — ElevenLabs
+        // treats "\n\n" as ordinary whitespace, so it doesn't affect timing.
+        const separator = isFirstSentenceOfParagraph ? '\n\n' : ' '
+        const candidate = current ? `${current}${separator}${sentence}` : sentence
         if (candidate.length > maxChars && current) {
           flush()
           current = sentence
         } else {
           current = candidate
         }
+        isFirstSentenceOfParagraph = false
       }
     }
     // Prefer a paragraph break as a chunk boundary when there's room left,
