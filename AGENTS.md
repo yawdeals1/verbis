@@ -8,9 +8,9 @@ Verbis — a personal read-aloud app for PDFs, Word docs, and scanned book pages
 
 ## Stack
 
-- Frontend: React + Vite, installable PWA, deployed to Netlify.
-- Backend: Node/Express, self-hosted on Deploro.
-- Database: Postgres, self-hosted on Deploro in production; `docker-compose.yml` at the repo root brings up a local instance for dev.
+- Frontend: React + Vite, installable PWA, served by nginx via Deploro VPS compute (`deploro.compose.yml`).
+- Backend: Node/Express, self-hosted on Deploro VPS compute (needs a real Node runtime — `@google-cloud/vision`, `jsdom`, and local-disk storage don't run on Deploro's Cloudflare Worker path).
+- Database: Deploro's per-project Studio REST API (`backend/src/db/studioClient.ts`), not a direct Postgres connection. Same database for local dev and production — both point at the same Deploro-hosted `verbis` project.
 - Storage: S3-compatible storage on Deploro in production (originals + generated audio); falls back to local disk under `backend/storage/` when `S3_*` env vars are unset, so the app runs before that infra exists.
 - TTS: ElevenLabs (`with-timestamps` endpoint — character-level alignment).
 - OCR: Google Cloud Vision (Document Text Detection).
@@ -20,14 +20,13 @@ Do not substitute any of these providers or hosting targets without discussing i
 
 ## Setup / Build / Test
 
-1. `docker compose up -d` (repo root) — starts local Postgres. Skip if pointing `DATABASE_URL` at Deploro instead.
-2. `cd backend && npm install`, copy `.env.example` to `.env` (or edit the existing `.env`) and fill in `ELEVENLABS_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS` — leave `S3_*` blank to use local disk storage.
+1. One-time, via the Deploro CLI: `deploro use verbis`, `deploro db create`, `deploro migrate create init --up-file backend/src/db/schema.sql` + `deploro migrate apply init`, then `deploro token create verbis-backend --read --write --project verbis` for a `DEPLORO_API_TOKEN` (needs both scopes — write-only fails on every read call).
+2. `cd backend && npm install`, copy `.env.example` to `.env` (or edit the existing `.env`) and fill in `ELEVENLABS_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `DEPLORO_API_URL` (`<deploro baseUrl>/api/projects/<id>/studio`), `DEPLORO_API_TOKEN` — leave `S3_*` blank to use local disk storage.
 3. Install [Ollama](https://ollama.com), run `ollama pull gemma4` (or a variant: `gemma4:e2b`/`e4b`/`26b`/`31b`), and start it with `ollama serve`. `OLLAMA_BASE_URL`/`OLLAMA_MODEL` in `.env` default to `http://localhost:11434`/`gemma4`.
-4. `npm run migrate` (backend/) — applies `src/db/schema.sql`.
-5. `npm run dev` (backend/) — starts the API on `PORT` (default 3001). `npm run typecheck` / `npm run build` also available.
-6. `cd frontend && npm install && npm run dev` — starts the Vite dev server (default 5173), reading `VITE_API_BASE_URL` from `frontend/.env`. `npx tsc -b` typechecks, `npm run build` produces the PWA build.
+4. `npm run dev` (backend/) — starts the API on `PORT` (default 3001). `npm run typecheck` / `npm run build` also available.
+5. `cd frontend && npm install && npm run dev` — starts the Vite dev server (default 5173), reading `VITE_API_BASE_URL` from `frontend/.env`. `npx tsc -b` typechecks, `npm run build` produces the PWA build.
 
-No automated test suite yet — verification today is `tsc`/`tsc -b` on both projects, a `vite build` to validate the PWA/workbox config, and targeted `tsx` smoke scripts for pure logic (chunking, word-boundary derivation, sentence grouping). Add real tests here as they're introduced, and keep this section current — an agent should be able to get a working dev environment running from this file alone, without guessing.
+No automated test suite yet — verification today is `tsc`/`tsc -b` on both projects, a `vite build` to validate the PWA/workbox config, targeted `tsx` smoke scripts for pure logic (chunking, word-boundary derivation, sentence grouping), and a live smoke test of every `db/*.ts` function against the real Deploro `verbis` project (full CRUD + JSONB round-trip + upsert emulation, all confirmed working). Add real tests here as they're introduced, and keep this section current — an agent should be able to get a working dev environment running from this file alone, without guessing.
 
 ## Coding Standards
 
@@ -43,6 +42,7 @@ No automated test suite yet — verification today is `tsc`/`tsc -b` on both pro
 3. **First chunk fast, rest in background.** Target under 5-8 seconds from upload to audio start: generate/return chunk 1 first, generate subsequent chunks asynchronously while playback continues.
 4. **Generate once, cache forever.** Never re-run TTS or OCR for content already processed — both are metered, billed APIs. Re-listening to a document must not re-trigger synthesis.
 5. **Storage is key-based, not URL-based.** `documents.original_file_key` and `chunks.audio_key` reference objects in the storage backend (S3-compatible bucket, or local disk in dev — see `backend/src/storage/index.ts`); access is mediated through the API, not public URLs.
+6. **No raw SQL — go through `db/studioClient.ts`.** The backend talks to Deploro's Studio REST API, not a direct Postgres connection. No server-side sort (sort client-side after fetching) and no native upsert (filter-lookup then update-or-insert — see `upsertVoice` in `db/voices.ts`). Response bodies are wrapped: `{ row: {...} }` for single-row endpoints, `{ rows: [...], total }` for lists — don't assume the bare object.
 
 ## Data Model
 

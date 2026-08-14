@@ -1,6 +1,8 @@
-import { getPool } from './pool.js'
+import { insertRow, listRows, updateRow } from './studioClient.js'
 import type { TimingData } from '../types/timing.js'
 import type { ChunkRow, ChunkStatus } from './types.js'
+
+const TABLE = 'chunks'
 
 function mapRow(row: Record<string, unknown>): ChunkRow {
   return {
@@ -9,57 +11,43 @@ function mapRow(row: Record<string, unknown>): ChunkRow {
     sequenceIndex: row.sequence_index as number,
     textContent: row.text_content as string,
     status: row.status as ChunkStatus,
-    audioKey: row.audio_key as string | null,
-    timingData: row.timing_data as TimingData | null,
-    durationSeconds: row.duration_seconds === null ? null : Number(row.duration_seconds),
+    audioKey: (row.audio_key as string | null) ?? null,
+    timingData: (row.timing_data as TimingData | null) ?? null,
+    durationSeconds: row.duration_seconds === null || row.duration_seconds === undefined ? null : Number(row.duration_seconds),
   }
 }
 
 export async function createChunks(documentId: string, texts: string[]): Promise<ChunkRow[]> {
-  const pool = getPool()
   const rows: ChunkRow[] = []
   for (let i = 0; i < texts.length; i++) {
-    const { rows: inserted } = await pool.query(
-      `INSERT INTO chunks (document_id, sequence_index, text_content)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [documentId, i, texts[i]],
-    )
-    rows.push(mapRow(inserted[0]))
+    const row = await insertRow<Record<string, unknown>>(TABLE, {
+      document_id: documentId,
+      sequence_index: i,
+      text_content: texts[i],
+      status: 'pending',
+    })
+    rows.push(mapRow(row))
   }
   return rows
 }
 
 export async function getChunksForDocument(documentId: string): Promise<ChunkRow[]> {
-  const { rows } = await getPool().query(
-    'SELECT * FROM chunks WHERE document_id = $1 ORDER BY sequence_index ASC',
-    [documentId],
-  )
-  return rows.map(mapRow)
-}
-
-export async function getChunkBySequence(
-  documentId: string,
-  sequenceIndex: number,
-): Promise<ChunkRow | null> {
-  const { rows } = await getPool().query(
-    'SELECT * FROM chunks WHERE document_id = $1 AND sequence_index = $2',
-    [documentId, sequenceIndex],
-  )
-  return rows[0] ? mapRow(rows[0]) : null
+  const rows = await listRows<Record<string, unknown>>(TABLE, { filter: { document_id: documentId } })
+  return rows.map(mapRow).sort((a, b) => a.sequenceIndex - b.sequenceIndex)
 }
 
 export async function markChunkReady(
   chunkId: string,
   data: { audioKey: string; timingData: TimingData; durationSeconds: number },
 ): Promise<void> {
-  await getPool().query(
-    `UPDATE chunks SET status = 'ready', audio_key = $2, timing_data = $3, duration_seconds = $4
-     WHERE id = $1`,
-    [chunkId, data.audioKey, JSON.stringify(data.timingData), data.durationSeconds],
-  )
+  await updateRow(TABLE, chunkId, {
+    status: 'ready',
+    audio_key: data.audioKey,
+    timing_data: data.timingData,
+    duration_seconds: data.durationSeconds,
+  })
 }
 
 export async function markChunkError(chunkId: string): Promise<void> {
-  await getPool().query("UPDATE chunks SET status = 'error' WHERE id = $1", [chunkId])
+  await updateRow(TABLE, chunkId, { status: 'error' })
 }

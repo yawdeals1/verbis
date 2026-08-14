@@ -1,5 +1,7 @@
-import { getPool } from './pool.js'
+import { getRow, insertRow, listRows, updateRow } from './studioClient.js'
 import type { DocumentRow, DocumentStatus, LastPosition, SourceType } from './types.js'
+
+const TABLE = 'documents'
 
 function mapRow(row: Record<string, unknown>): DocumentRow {
   return {
@@ -7,12 +9,12 @@ function mapRow(row: Record<string, unknown>): DocumentRow {
     title: row.title as string,
     sourceType: row.source_type as SourceType,
     originalFileKey: row.original_file_key as string,
-    voiceId: row.voice_id as string | null,
+    voiceId: (row.voice_id as string | null) ?? null,
     status: row.status as DocumentStatus,
-    errorMessage: row.error_message as string | null,
-    lastPosition: row.last_position as LastPosition | null,
-    summary: row.summary as string | null,
-    createdAt: (row.created_at as Date).toISOString(),
+    errorMessage: (row.error_message as string | null) ?? null,
+    lastPosition: (row.last_position as LastPosition | null) ?? null,
+    summary: (row.summary as string | null) ?? null,
+    createdAt: new Date(row.created_at as string).toISOString(),
   }
 }
 
@@ -22,23 +24,24 @@ export async function createDocument(input: {
   originalFileKey: string
   voiceId: string
 }): Promise<DocumentRow> {
-  const { rows } = await getPool().query(
-    `INSERT INTO documents (title, source_type, original_file_key, voice_id, status)
-     VALUES ($1, $2, $3, $4, 'processing')
-     RETURNING *`,
-    [input.title, input.sourceType, input.originalFileKey, input.voiceId],
-  )
-  return mapRow(rows[0])
+  const row = await insertRow<Record<string, unknown>>(TABLE, {
+    title: input.title,
+    source_type: input.sourceType,
+    original_file_key: input.originalFileKey,
+    voice_id: input.voiceId,
+    status: 'processing',
+  })
+  return mapRow(row)
 }
 
 export async function getDocument(id: string): Promise<DocumentRow | null> {
-  const { rows } = await getPool().query('SELECT * FROM documents WHERE id = $1', [id])
-  return rows[0] ? mapRow(rows[0]) : null
+  const row = await getRow<Record<string, unknown>>(TABLE, id)
+  return row ? mapRow(row) : null
 }
 
 export async function listDocuments(): Promise<DocumentRow[]> {
-  const { rows } = await getPool().query('SELECT * FROM documents ORDER BY created_at DESC')
-  return rows.map(mapRow)
+  const rows = await listRows<Record<string, unknown>>(TABLE)
+  return rows.map(mapRow).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
 export async function updateDocumentStatus(
@@ -46,20 +49,13 @@ export async function updateDocumentStatus(
   status: DocumentStatus,
   errorMessage?: string,
 ): Promise<void> {
-  await getPool().query('UPDATE documents SET status = $2, error_message = $3 WHERE id = $1', [
-    id,
-    status,
-    errorMessage ?? null,
-  ])
+  await updateRow(TABLE, id, { status, error_message: errorMessage ?? null })
 }
 
 export async function updateLastPosition(id: string, position: LastPosition): Promise<void> {
-  await getPool().query('UPDATE documents SET last_position = $2 WHERE id = $1', [
-    id,
-    JSON.stringify(position),
-  ])
+  await updateRow(TABLE, id, { last_position: position })
 }
 
 export async function updateSummary(id: string, summary: string): Promise<void> {
-  await getPool().query('UPDATE documents SET summary = $2 WHERE id = $1', [id, summary])
+  await updateRow(TABLE, id, { summary })
 }

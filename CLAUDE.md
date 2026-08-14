@@ -8,9 +8,9 @@ A personal read-aloud app: import a PDF/DOCX or a photo of a book page, get it r
 
 ## Stack
 
-- **Frontend**: React + Vite, built as an installable PWA. Deployed to Netlify.
-- **Backend**: Node/Express, self-hosted on Deploro.
-- **Database**: Postgres, self-hosted on Deploro in production; `docker-compose.yml` at the repo root for local dev.
+- **Frontend**: React + Vite, built as an installable PWA. Served by nginx, deployed via Deploro VPS compute (`deploro.compose.yml`).
+- **Backend**: Node/Express, self-hosted on Deploro VPS compute (needed for `@google-cloud/vision`, `jsdom`, and local-disk storage, none of which run on Deploro's Cloudflare Worker path).
+- **Database**: Deploro's per-project Studio REST API (`backend/src/db/studioClient.ts`), not a direct Postgres connection — same for local dev and production, both point at the same Deploro-hosted `verbis` project via `DEPLORO_API_URL`/`DEPLORO_API_TOKEN`.
 - **File/audio storage**: S3-compatible storage on Deploro (e.g. Hetzner) in production; falls back to local disk (`backend/storage/`) when `S3_*` env vars are unset (`backend/src/storage/index.ts`).
 - **TTS**: ElevenLabs, `/v1/text-to-speech/{voice_id}/with-timestamps`.
 - **OCR**: Google Cloud Vision, Document Text Detection mode.
@@ -26,6 +26,7 @@ No other providers should be introduced for these roles without discussing it fi
 - **Generate the first chunk before the rest.** Playback should start within 5-8 seconds of upload. Generate chunk 1 synchronously (or near it), then generate remaining chunks in the background while playback continues.
 - **Cache aggressively.** Once a chunk's audio is generated, never regenerate it. Both TTS and OCR are metered APIs — re-synthesis on re-listen is a cost bug, not just a performance one.
 - **Storage keys, not bare URLs.** `documents.original_file_key` and `chunks.audio_key` are storage keys (S3-compatible bucket, or local disk in dev), not public URLs — the API mediates access via `GET /documents/:id/chunks/:seq/audio`.
+- **No raw SQL — go through `db/studioClient.ts`.** The backend talks to Deploro's Studio REST API, not a direct Postgres connection. It has no server-side sort (sort client-side after fetching) and no native upsert (look up by filter, then update-or-insert — see `upsertVoice` in `db/voices.ts` for the pattern). Response bodies are wrapped: `{ row: {...} }` for single-row endpoints, `{ rows: [...], total }` for lists.
 
 ## Data Model
 
@@ -35,7 +36,7 @@ See `PRODUCT_PLAN.md` §4 for the full `documents` / `chunks` / `voices` / `read
 
 Follow the phase order in `PRODUCT_PLAN.md` §5 — don't jump ahead to Phase 2 (scan/OCR) or Phase 4 (summarization/Q&A/sync) work before Phase 1 (core PDF/DOCX loop with synced highlighting) is solid. The highlighting sync is the feature that makes or breaks the product; get it right on the simplest input path (PDF/DOCX) before adding OCR noise on top.
 
-**Status**: Phases 1–4 are implemented (multi-device sync excluded by design — see `PRODUCT_PLAN.md` §5). Nothing has been run end-to-end against real provider responses yet — `backend/.env` needs real API keys, and a Postgres instance needs to be running (`docker compose up -d` + `npm run migrate`) before any of it is exercised for real.
+**Status**: Phases 1–4 are implemented (multi-device sync excluded by design — see `PRODUCT_PLAN.md` §5). The database layer is verified end-to-end against the real Deploro `verbis` project. ElevenLabs/Google Cloud Vision/Ollama routes still need real keys in `backend/.env` before they're exercised for real.
 
 ## Known Open Risks
 

@@ -1,6 +1,7 @@
 -- Verbis schema. See PRODUCT_PLAN.md §4 for the source-of-truth data model.
--- Run with `npm run migrate` (backend/), or manually:
---   psql "$DATABASE_URL" -f src/db/schema.sql
+-- Applied via the Deploro CLI (no direct Postgres connection from the app):
+--   deploro migrate create init --up-file backend/src/db/schema.sql
+--   deploro migrate apply init
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 

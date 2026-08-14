@@ -6,7 +6,7 @@
 
 Verbis is a personal read-aloud app: import a PDF, DOCX, or a photo of a physical book page, and have it read aloud in a natural voice with the current word highlighted in sync, so you can follow along or glance up and find your place instantly. Tapping any word jumps both the highlight and the audio to that point. Documents live in a personal library with reading position saved automatically.
 
-Finalized stack: **React + Vite installable PWA on Netlify**, talking to a **Node/Express API self-hosted on Deploro**, backed by **self-hosted Postgres + S3-compatible storage on Deploro**, using **ElevenLabs** for TTS with character-level timing and **Google Cloud Vision** for OCR.
+Finalized stack: **React + Vite installable PWA and a Node/Express API, both self-hosted on Deploro VPS compute**, backed by **Deploro's Studio REST API for the database + S3-compatible storage on Deploro**, using **ElevenLabs** for TTS with character-level timing and **Google Cloud Vision** for OCR.
 
 ## 2. Finalized Architecture
 
@@ -16,19 +16,19 @@ Finalized stack: **React + Vite installable PWA on Netlify**, talking to a **Nod
 | OCR | Google Cloud Vision, Document Text Detection | Purpose-built for dense printed text on photographed pages; handles skew/lighting reasonably and preserves reading order, which matters more here than raw character accuracy. Cheap at personal-use volume. |
 | Platform | Installable PWA (single React + Vite codebase) | One codebase covers desktop and mobile. Browser camera input (`<input type="file" accept="image/*" capture>`) covers the scan-a-book-page use case without a native app build/store overhead. "Add to Home Screen" gives an app-like feel for a personal tool. |
 | Backend | Node/Express, self-hosted on Deploro | Avoids serverless execution-time limits — TTS generation, OCR calls, and chunk processing can run long, especially on first-chunk-through-full-document generation. Matches the pattern used by AmpedClock, Amped Cadence, and PX Dispatch. |
-| Database | Postgres, self-hosted on Deploro | Consistent with existing self-hosted infra; full control over backups/migrations alongside other projects. |
-| File/audio storage | S3-compatible storage on Deploro (e.g. Hetzner) | Same rationale as database — keeps original uploads and generated audio files under the same self-hosted footprint rather than introducing a managed dependency. |
-| Frontend hosting | Netlify | Matches the PRD's stated default and the user's usual deployment pattern; doesn't conflict with a self-hosted backend since the PWA just calls the Deploro API over HTTPS. **Flagging this as an assumption** — confirm or override if you'd rather serve the frontend from Deploro too for a fully single-host setup. |
+| Database | Deploro's per-project Studio REST API (`db/studioClient.ts`), not a direct Postgres connection | Originally direct `pg` to a self-hosted Postgres instance; switched because a direct connection only works from Deploro VPS compute, and the app also needs `@google-cloud/vision`/`jsdom`/local-disk storage which are VPS-only anyway — but the Studio API removes one more hard dependency and is Deploro's own managed path, so there's no reason to hold onto raw `pg` once VPS wasn't the thing forcing the choice. Verified against the real `verbis` project's database (see `PRODUCT_PLAN.md` implementation status below). |
+| File/audio storage | S3-compatible storage on Deploro (e.g. Hetzner), falling back to local disk on the VPS when unset | Keeps original uploads and generated audio files under the same self-hosted footprint rather than introducing a managed dependency. |
+| Frontend hosting | Deploro VPS (nginx serving the static build), alongside the backend, both in `deploro.compose.yml` | Originally planned for Netlify; switched to keep the whole app on one platform/one `deploro vps deploy` once the backend was confirmed to need VPS compute anyway (OCR/web-import/storage are Node-native, not Workers-compatible). |
 
 ## 3. System Flow
 
 ```
-[PWA — Netlify]
+[PWA — nginx, Deploro VPS]
   ├─ Upload PDF/DOCX, or capture/upload a book-page photo
   ├─ Playback UI: <audio> element + text column + controls
   │
   ▼  HTTPS
-[Express API — Deploro]
+[Express API — Deploro VPS]
   ├─ Text extraction: pdf.js / mammoth.js (PDF/DOCX), or forwards photo to OCR
   ├─ OCR: Google Cloud Vision → structured text
   ├─ Chunking: split extracted text into sentence/paragraph-sized chunks
@@ -36,13 +36,13 @@ Finalized stack: **React + Vite installable PWA on Netlify**, talking to a **Nod
   ├─ Persists: chunk text, audio file, timing JSON
   │
   ▼
-[Postgres — Deploro]              [S3-compatible storage — Deploro]
+[Deploro Studio REST API]         [S3-compatible storage — Deploro]
   documents, chunks (metadata,      original uploads, generated
   timing_data JSON), voices,        audio files per chunk
   reading_sessions
   │
   ▼
-[PWA — Netlify]
+[PWA — nginx, Deploro VPS]
   ├─ Fetches audio + timing_data per chunk, caches them
   ├─ On <audio> `timeupdate`, matches playback time → timing_data →
   │   current char range → current word → updates highlight in the DOM
@@ -61,7 +61,7 @@ Implemented in `backend/src/db/schema.sql` (source of truth — keep this sectio
 - **voices**: `id`, `provider` (`elevenlabs`), `provider_voice_id`, `display_name`
 - **reading_sessions**: defined in the schema for future history-beyond-last-position use; not yet written to by any route — `documents.last_position` covers resume for v1.
 
-Object storage note: `putObject`/`getObjectBuffer` (`backend/src/storage/index.ts`) fall back to local disk under `backend/storage/` when `S3_*` env vars are unset, so the app runs before Deploro object storage is provisioned. Same idea for the database — `docker-compose.yml` at the repo root brings up a local Postgres for development ahead of the Deploro instance.
+Object storage note: `putObject`/`getObjectBuffer` (`backend/src/storage/index.ts`) fall back to local disk under `backend/storage/` when `S3_*` env vars are unset, so the app runs before Deploro object storage is provisioned. There's no separate local-dev database anymore — both local dev and the deployed app talk to the same Deploro-hosted Studio API for the `verbis` project (`backend/src/db/studioClient.ts`), authenticated with a project-scoped PAT (`DEPLORO_API_TOKEN`).
 
 ## 5. Build Phases
 
@@ -81,24 +81,22 @@ Summarization and lightweight document Q&A are implemented (local Ollama model �
 
 All of Phase 1–4 above is built (`backend/src/`, `frontend/src/`) except multi-device sync (see note above). What's still required before it runs against real infrastructure:
 
-- Fill in `backend/.env` (copied from `.env.example`): `ELEVENLABS_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, and either `DATABASE_URL` pointed at a running Postgres or leave `S3_*` blank for local disk storage.
+- Fill in `backend/.env` (copied from `.env.example`): `ELEVENLABS_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `DEPLORO_API_URL`/`DEPLORO_API_TOKEN` (from `deploro token create --project verbis`), and leave `S3_*` blank for local disk storage.
 - Install [Ollama](https://ollama.com), run `ollama pull gemma4` (or a variant: `gemma4:e2b`/`e4b`/`26b`/`31b`), and `ollama serve` — `OLLAMA_BASE_URL`/`OLLAMA_MODEL` in `.env` default to `http://localhost:11434`/`gemma4`.
-- Bring up Postgres — `docker compose up -d` at the repo root (local dev) or point `DATABASE_URL` at Deploro — then run `npm run migrate` in `backend/`.
-- Everything was verified via `tsc --noEmit`/`tsc -b` on both projects, a clean `vite build` (PWA/workbox config), and isolated logic tests (chunking, ElevenLabs word-boundary derivation, sentence grouping) run without any live API keys or database. Routes that need Postgres, ElevenLabs, Cloud Vision, or Ollama have **not** been exercised end-to-end against real provider responses — do that once keys are filled in and Ollama is running.
+- Apply the schema once via the Deploro CLI (`deploro db create`, then `deploro migrate create init --up-file backend/src/db/schema.sql` + `deploro migrate apply init`) — not something the running app does itself.
+- Database-layer functions (`db/documents.ts`/`db/chunks.ts`/`db/voices.ts`, backed by `db/studioClient.ts`) were verified end-to-end against the real `verbis` project's Studio API — full CRUD, JSONB round-tripping, and the upsert-voice emulation all confirmed working. `tsc --noEmit`/`tsc -b` pass on both projects, and a clean `vite build` validates the PWA/workbox config. ElevenLabs/Cloud Vision/Ollama routes still haven't been exercised end-to-end against real provider responses — do that once those keys are filled in.
 
 ## 6. Environment/Secrets Checklist
 
 - [ ] ElevenLabs API key → `backend/.env` `ELEVENLABS_API_KEY`
 - [ ] Google Cloud Vision service account credentials → `GOOGLE_APPLICATION_CREDENTIALS` (path to the JSON key)
 - [ ] Ollama running locally with `gemma4` pulled → `OLLAMA_BASE_URL`/`OLLAMA_MODEL` (Phase 4 summarize/Q&A, no API key)
-- [ ] Postgres reachable → `DATABASE_URL` (local: `docker compose up -d` + `npm run migrate`; production: Deploro connection string)
+- [x] Deploro `verbis` project database → `deploro db create` + `deploro migrate create/apply` against `backend/src/db/schema.sql`; app reaches it via `DEPLORO_API_URL`/`DEPLORO_API_TOKEN`, no direct Postgres connection
 - [ ] S3-compatible bucket (optional until then) → `S3_ENDPOINT`/`S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`; leave blank to use local disk storage under `backend/storage/` in the meantime
-- [ ] Netlify site created and linked for the frontend build
-- [ ] Deploro Express API deployment target set up, with the above secrets injected server-side only (never shipped to the PWA client)
+- [ ] `deploro vps deploy` for both the backend and frontend (`deploro.compose.yml`), with the above secrets injected via `deploro vps set-env` — server-side only, never shipped to the PWA client
 
 ## 7. Open Flags
 
-- **Frontend hosting on Netlify is an assumption**, not something explicitly re-confirmed in this round of questions — flag if you'd rather host it on Deploro too.
 - **OCR accuracy on real book photos** is the single biggest technical unknown. Test Cloud Vision against a handful of real scanned pages (varied lighting, angle, font) early, before the Phase 2 pipeline is locked in.
 - **Chunking strategy** (sentence-level vs. paragraph-level) affects both cost and highlight smoothness — worth a quick prototype of both before committing in Phase 1.
 - **TTS cost at real usage volume**: ElevenLabs' free tier (~10K characters/month) is small. Model expected pages/month early so paid-tier budgeting isn't a mid-build surprise.

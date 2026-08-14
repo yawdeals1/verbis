@@ -25,14 +25,16 @@ export const env = {
   // Lazily validated — only thrown when a route actually needs a given
   // provider, so `npm run dev` works before every key is provisioned.
   //
-  // On Deploro VPS compute, DATABASE_URL_INTERNAL (the container-network
-  // hostname, no allowlist required) is preferred over the public
-  // DATABASE_URL when both are set — the app runs on the same VPS as its
-  // database, so there's no reason to route through the allowlisted public
-  // port. Local dev only has DATABASE_URL (docker-compose Postgres), so the
-  // fallback keeps that working unchanged.
-  get databaseUrl() {
-    return optional('DATABASE_URL_INTERNAL') ?? required('DATABASE_URL')
+  // No direct Postgres connection — the backend talks to Deploro's
+  // per-project Studio REST API instead (see db/studioClient.ts), so it
+  // doesn't need Deploro VPS compute just to reach its own database.
+  // DEPLORO_API_TOKEN is a project-scoped PAT minted via
+  // `deploro token create --project verbis`.
+  get deploroApiUrl() {
+    return required('DEPLORO_API_URL')
+  },
+  get deploroApiToken() {
+    return required('DEPLORO_API_TOKEN')
   },
   get elevenLabsApiKey() {
     return required('ELEVENLABS_API_KEY')

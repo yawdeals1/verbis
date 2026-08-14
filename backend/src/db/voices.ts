@@ -1,5 +1,7 @@
-import { getPool } from './pool.js'
+import { getRow, insertRow, listRows, updateRow } from './studioClient.js'
 import type { VoiceRow } from './types.js'
+
+const TABLE = 'voices'
 
 function mapRow(row: Record<string, unknown>): VoiceRow {
   return {
@@ -11,27 +13,42 @@ function mapRow(row: Record<string, unknown>): VoiceRow {
 }
 
 export async function listVoiceRows(): Promise<VoiceRow[]> {
-  const { rows } = await getPool().query('SELECT * FROM voices ORDER BY display_name ASC')
-  return rows.map(mapRow)
+  const rows = await listRows<Record<string, unknown>>(TABLE)
+  return rows.map(mapRow).sort((a, b) => a.displayName.localeCompare(b.displayName))
 }
 
 export async function getVoice(id: string): Promise<VoiceRow | null> {
-  const { rows } = await getPool().query('SELECT * FROM voices WHERE id = $1', [id])
-  return rows[0] ? mapRow(rows[0]) : null
+  const row = await getRow<Record<string, unknown>>(TABLE, id)
+  return row ? mapRow(row) : null
 }
 
-/** Upserts a voice by (provider, provider_voice_id) so re-syncing the ElevenLabs voice list is idempotent. */
+/**
+ * Upserts a voice by (provider, provider_voice_id) so re-syncing the
+ * ElevenLabs voice list is idempotent. The Studio API has no native upsert
+ * (no ON CONFLICT equivalent), so this does a filtered lookup first, then
+ * either updates or inserts.
+ */
 export async function upsertVoice(input: {
   provider: string
   providerVoiceId: string
   displayName: string
 }): Promise<VoiceRow> {
-  const { rows } = await getPool().query(
-    `INSERT INTO voices (provider, provider_voice_id, display_name)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (provider, provider_voice_id) DO UPDATE SET display_name = EXCLUDED.display_name
-     RETURNING *`,
-    [input.provider, input.providerVoiceId, input.displayName],
-  )
-  return mapRow(rows[0])
+  const existing = await listRows<Record<string, unknown>>(TABLE, {
+    filter: { provider: input.provider, provider_voice_id: input.providerVoiceId },
+    limit: 1,
+  })
+
+  if (existing.length > 0) {
+    const updated = await updateRow<Record<string, unknown>>(TABLE, existing[0].id as string, {
+      display_name: input.displayName,
+    })
+    return mapRow(updated)
+  }
+
+  const row = await insertRow<Record<string, unknown>>(TABLE, {
+    provider: input.provider,
+    provider_voice_id: input.providerVoiceId,
+    display_name: input.displayName,
+  })
+  return mapRow(row)
 }
