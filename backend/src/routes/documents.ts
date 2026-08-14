@@ -6,8 +6,7 @@ import { getChunksForDocument } from '../db/chunks.js'
 import { getVoice } from '../db/voices.js'
 import { deleteObject, getObjectBuffer, putObject } from '../storage/index.js'
 import { extractDocxText, extractEpubText, extractTxtText } from '../services/textExtraction.js'
-import { extractPdfLayout } from '../services/pdfLayout.js'
-import { ingestDocument, NoTextExtractedError } from '../services/documentPipeline.js'
+import { ingestDocument, ingestPdfDocument, NoTextExtractedError } from '../services/documentPipeline.js'
 import { scanRouter } from './scan.js'
 import { insightsRouter } from './insights.js'
 import { urlImportRouter } from './urlImport.js'
@@ -58,29 +57,22 @@ documentsRouter.post('/', upload.single('file'), async (req, res) => {
   try {
     const title = path.basename(req.file.originalname, path.extname(req.file.originalname))
 
-    const document = await (async () => {
-      if (sourceType === 'pdf') {
-        const { text, pages, words } = await extractPdfLayout(req.file!.buffer)
-        return ingestDocument({
-          title,
-          sourceType,
-          fileBuffer: req.file!.buffer,
-          fileContentType: req.file!.mimetype || 'application/octet-stream',
-          extractedText: text,
-          pageLayout: { pages, words },
-          voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
-        })
-      }
-      const extractedText = await EXTRACTORS[sourceType]!(req.file!.buffer)
-      return ingestDocument({
-        title,
-        sourceType,
-        fileBuffer: req.file!.buffer,
-        fileContentType: req.file!.mimetype || 'application/octet-stream',
-        extractedText,
-        voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
-      })
-    })()
+    const document =
+      sourceType === 'pdf'
+        ? await ingestPdfDocument({
+            title,
+            fileBuffer: req.file.buffer,
+            fileContentType: req.file.mimetype || 'application/octet-stream',
+            voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
+          })
+        : await ingestDocument({
+            title,
+            sourceType,
+            fileBuffer: req.file.buffer,
+            fileContentType: req.file.mimetype || 'application/octet-stream',
+            extractedText: await EXTRACTORS[sourceType]!(req.file.buffer),
+            voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
+          })
 
     res.status(201).json({ document })
   } catch (err) {

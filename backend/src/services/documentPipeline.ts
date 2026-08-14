@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { putObject } from '../storage/index.js'
-import { createDocument, updateDocumentStatus } from '../db/documents.js'
+import { createDocument, updateDocumentStatus, updatePageLayout } from '../db/documents.js'
 import { createChunks } from '../db/chunks.js'
 import { getVoice, listVoiceRows, upsertVoice } from '../db/voices.js'
 import { listVoices as listElevenLabsVoices } from './elevenlabs.js'
 import { splitIntoChunks } from './chunking.js'
 import { processDocument } from './generation.js'
+import { extractPdfLayout } from './pdfLayout.js'
 import type { DocumentRow, SourceType } from '../db/types.js'
 import type { VoiceRow } from '../db/types.js'
 import type { PdfLayout } from './pdfLayout.js'
@@ -92,6 +93,67 @@ function generateDocumentInBackground(documentId: string, text: string, voicePro
     } catch (err) {
       console.error(`Document generation failed (document ${documentId}):`, err)
       await updateDocumentStatus(documentId, 'error', 'Failed to process this document.').catch(() => {})
+    }
+  })()
+}
+
+export interface IngestPdfInput {
+  title: string
+  fileBuffer: Buffer
+  fileContentType: string
+  voiceId?: string
+}
+
+/**
+ * PDF-specific ingest path: unlike the other formats, PDF layout extraction
+ * (services/pdfLayout.ts — per-page pdfjs parsing, column/section reading-
+ * order detection, and word bounding boxes) can legitimately take well past
+ * what a reverse proxy or browser treats as a reasonable request timeout for
+ * a long or layout-heavy document. It used to run synchronously before this
+ * function even returned, which meant a large PDF import could leave the
+ * client hanging on the upload request indefinitely with the document never
+ * even appearing. Extraction now runs in the background alongside chunking
+ * and TTS, the same way those already do — the document exists (status
+ * 'processing', pageLayout null) the instant this returns, and the frontend
+ * poll picks up pageLayout/chunks once each stage finishes.
+ */
+export async function ingestPdfDocument(input: IngestPdfInput): Promise<DocumentRow> {
+  const voice = await resolveVoice(input.voiceId)
+
+  const originalFileKey = `originals/${randomUUID()}`
+  await putObject(originalFileKey, input.fileBuffer, input.fileContentType)
+
+  const document = await createDocument({
+    title: input.title,
+    sourceType: 'pdf',
+    originalFileKey,
+    voiceId: voice.id,
+    pageLayout: null,
+  })
+
+  runPdfPipelineInBackground(document.id, input.fileBuffer, voice.providerVoiceId)
+
+  return document
+}
+
+function runPdfPipelineInBackground(documentId: string, fileBuffer: Buffer, voiceProviderVoiceId: string): void {
+  void (async () => {
+    try {
+      const { text, pages, words } = await extractPdfLayout(fileBuffer)
+      const trimmed = text.trim()
+      if (!trimmed) {
+        await updateDocumentStatus(documentId, 'error', 'No text could be extracted from this document.')
+        return
+      }
+
+      await updatePageLayout(documentId, { pages, words })
+
+      const chunkSplits = splitIntoChunks(trimmed)
+      const chunks = await createChunks(documentId, chunkSplits)
+      await processDocument(documentId, voiceProviderVoiceId, chunks)
+    } catch (err) {
+      console.error(`PDF extraction failed (document ${documentId}):`, err)
+      await updateDocumentStatus(documentId, 'error', 'Failed to process this PDF.').catch(() => {})
     }
   })()
 }

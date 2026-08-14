@@ -63,6 +63,10 @@ export async function updateSummary(id: string, summary: string): Promise<void> 
   await updateRow(TABLE, id, { summary })
 }
 
+export async function updatePageLayout(id: string, pageLayout: DocumentRow['pageLayout']): Promise<void> {
+  await updateRow(TABLE, id, { page_layout: pageLayout })
+}
+
 /** Deletes the document row — chunks cascade via the DB's ON DELETE CASCADE FK. Storage cleanup (original file, chunk audio) is the caller's responsibility, since that lives outside the DB. */
 export async function deleteDocument(id: string): Promise<void> {
   await deleteRow(TABLE, id)

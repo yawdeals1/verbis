@@ -68,9 +68,7 @@ export default function Reader() {
         )}
       </header>
 
-      {document.status === 'error' && (
-        <p role="alert">Something went wrong generating audio: {document.errorMessage}</p>
-      )}
+      {document.status === 'error' && <p role="alert">Something went wrong: {document.errorMessage}</p>}
       {document.status === 'processing' && chunks.length === 0 && <p>Extracting text and preparing your document…</p>}
       {document.status === 'processing' && chunks.length > 0 && (
         <p>
