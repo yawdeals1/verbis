@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { putObject } from '../storage/index.js'
-import { createDocument, getDocument, updateDocumentStatus } from '../db/documents.js'
+import { createDocument, updateDocumentStatus } from '../db/documents.js'
 import { createChunks } from '../db/chunks.js'
 import { getVoice, listVoiceRows, upsertVoice } from '../db/voices.js'
 import { listVoices as listElevenLabsVoices } from './elevenlabs.js'
@@ -46,9 +46,17 @@ export interface IngestInput {
 
 /**
  * Shared pipeline for every import path (PDF/DOCX/TXT/EPUB upload, book-page
- * scan): store the original, chunk the text, generate the first chunk's
- * audio synchronously so the caller can start playback immediately, and
- * queue the rest in the background.
+ * scan, URL import): store the original and create the document row, then
+ * return immediately. Chunking and TTS generation happen in the
+ * background, not before responding — with the Studio API, `createChunks`
+ * alone is N sequential network round-trips, and blocking the HTTP
+ * response on that plus a full TTS call routinely took well past what
+ * proxies/browsers treat as reasonable, with zero progress feedback in the
+ * meantime. The frontend already polls `GET /documents/:id` while
+ * `status === 'processing'` (see `useReaderPlayback.ts`) — that's what
+ * surfaces real progress, not a single opaque wait, and it also means the
+ * document exists (and is visible in the library) the instant it's
+ * created rather than only once the entire pipeline finishes.
  */
 export async function ingestDocument(input: IngestInput): Promise<DocumentRow> {
   const text = input.extractedText.trim()
@@ -66,15 +74,21 @@ export async function ingestDocument(input: IngestInput): Promise<DocumentRow> {
     voiceId: voice.id,
   })
 
-  const chunkTexts = splitIntoChunks(text)
-  const chunks = await createChunks(document.id, chunkTexts)
+  generateDocumentInBackground(document.id, text, voice.providerVoiceId)
 
-  await processDocument(document.id, voice.providerVoiceId, chunks)
-
-  const refreshed = await getDocument(document.id)
-  return refreshed ?? document
+  return document
 }
 
-export async function failDocument(documentId: string, message: string): Promise<void> {
-  await updateDocumentStatus(documentId, 'error', message)
+function generateDocumentInBackground(documentId: string, text: string, voiceProviderVoiceId: string): void {
+  void (async () => {
+    try {
+      const chunkTexts = splitIntoChunks(text)
+      const chunks = await createChunks(documentId, chunkTexts)
+      await processDocument(documentId, voiceProviderVoiceId, chunks)
+    } catch (err) {
+      console.error(`Document generation failed (document ${documentId}):`, err)
+      await updateDocumentStatus(documentId, 'error', 'Failed to process this document.').catch(() => {})
+    }
+  })()
 }
+

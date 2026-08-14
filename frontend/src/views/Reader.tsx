@@ -40,22 +40,32 @@ export default function Reader() {
   }
 
   const { document, chunks } = detail
+  const readyCount = chunks.filter((c) => c.status === 'ready').length
 
   return (
     <section className="reader">
       <header>
         <h1>{document.title}</h1>
-        <p className="reader-meta">
-          Chunk {chunkIndex + 1} of {chunks.length}
-        </p>
+        {chunks.length > 0 && (
+          <p className="reader-meta">
+            Chunk {chunkIndex + 1} of {chunks.length}
+          </p>
+        )}
       </header>
 
       {document.status === 'error' && (
         <p role="alert">Something went wrong generating audio: {document.errorMessage}</p>
       )}
-      {document.status === 'processing' && <p>Preparing your document…</p>}
-      {currentChunk?.status === 'pending' && document.status !== 'processing' && (
-        <p>Generating audio for this section…</p>
+      {document.status === 'processing' && chunks.length === 0 && <p>Extracting text and preparing your document…</p>}
+      {document.status === 'processing' && chunks.length > 0 && (
+        <p>
+          Generating audio… {readyCount} of {chunks.length} sections ready
+        </p>
+      )}
+      {document.status === 'ready' && currentChunk?.status === 'pending' && (
+        <p>
+          Generating audio for this section… ({readyCount} of {chunks.length} sections ready)
+        </p>
       )}
 
       <div className="reader-settings">
