@@ -4,12 +4,12 @@ import { env } from '../config/env.js'
 let client: ImageAnnotatorClient | undefined
 
 function getClient(): ImageAnnotatorClient {
-  // Referencing env.googleCloudVisionCredentials throws if unset, which is
-  // what we want here — this getter is only called when a scan is actually
-  // uploaded, not at module load time.
-  env.googleCloudVisionCredentials
   if (!client) {
-    client = new ImageAnnotatorClient()
+    // Passed explicitly rather than relying on the client's own
+    // GOOGLE_APPLICATION_CREDENTIALS env lookup — env.googleCloudVisionCredentials
+    // may resolve to a temp file it just wrote (from GOOGLE_APPLICATION_CREDENTIALS_JSON),
+    // which nothing else points the env var at.
+    client = new ImageAnnotatorClient({ keyFilename: env.googleCloudVisionCredentials })
   }
   return client
 }
