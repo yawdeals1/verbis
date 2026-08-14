@@ -1,4 +1,5 @@
 import type { TimingData } from '../types/timing.js'
+import type { PdfLayout } from '../services/pdfLayout.js'
 
 export type SourceType = 'pdf' | 'docx' | 'txt' | 'epub' | 'scan' | 'url'
 export type DocumentStatus = 'processing' | 'ready' | 'error'
@@ -19,6 +20,8 @@ export interface DocumentRow {
   errorMessage: string | null
   lastPosition: LastPosition | null
   summary: string | null
+  /** PDF-only: per-word bounding boxes for the real-PDF-rendering reader view. Null for non-PDF sources and for PDFs imported before this existed. */
+  pageLayout: Pick<PdfLayout, 'pages' | 'words'> | null
   createdAt: string
 }
 
@@ -27,6 +30,8 @@ export interface ChunkRow {
   documentId: string
   sequenceIndex: number
   textContent: string
+  /** This chunk's starting offset within the document's full extracted text — see chunking.ts's ChunkSplit. Only meaningful for PDFs (used to map TTS word timing onto documents.pageLayout); harmless/unused otherwise. */
+  charStart: number | null
   status: ChunkStatus
   audioKey: string | null
   timingData: TimingData | null

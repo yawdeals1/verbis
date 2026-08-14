@@ -8,6 +8,7 @@ import { splitIntoChunks } from './chunking.js'
 import { processDocument } from './generation.js'
 import type { DocumentRow, SourceType } from '../db/types.js'
 import type { VoiceRow } from '../db/types.js'
+import type { PdfLayout } from './pdfLayout.js'
 
 export class NoTextExtractedError extends Error {
   constructor() {
@@ -42,6 +43,8 @@ export interface IngestInput {
   fileContentType: string
   extractedText: string
   voiceId?: string
+  /** PDF-only: per-word bounding boxes from pdfLayout.ts, stored on the document for the Page view reader. */
+  pageLayout?: Pick<PdfLayout, 'pages' | 'words'>
 }
 
 /**
@@ -72,6 +75,7 @@ export async function ingestDocument(input: IngestInput): Promise<DocumentRow> {
     sourceType: input.sourceType,
     originalFileKey,
     voiceId: voice.id,
+    pageLayout: input.pageLayout ?? null,
   })
 
   generateDocumentInBackground(document.id, text, voice.providerVoiceId)
@@ -82,8 +86,8 @@ export async function ingestDocument(input: IngestInput): Promise<DocumentRow> {
 function generateDocumentInBackground(documentId: string, text: string, voiceProviderVoiceId: string): void {
   void (async () => {
     try {
-      const chunkTexts = splitIntoChunks(text)
-      const chunks = await createChunks(documentId, chunkTexts)
+      const chunkSplits = splitIntoChunks(text)
+      const chunks = await createChunks(documentId, chunkSplits)
       await processDocument(documentId, voiceProviderVoiceId, chunks)
     } catch (err) {
       console.error(`Document generation failed (document ${documentId}):`, err)

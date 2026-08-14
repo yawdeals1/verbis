@@ -56,8 +56,8 @@ Chunking is generation-time (first chunk generated immediately so playback start
 
 Implemented in `backend/src/db/schema.sql` (source of truth — keep this section in sync with it):
 
-- **documents**: `id`, `title`, `source_type` (`pdf` | `docx` | `txt` | `epub` | `scan` | `url`), `original_file_key` (bucket key, not a generic URL), `voice_id` (FK → voices), `status` (`processing` | `ready` | `error`), `error_message`, `last_position` (JSON: `{chunkSequenceIndex, timeSeconds}`), `summary` (Phase 4, cached on first generation), `created_at`
-- **chunks**: `id`, `document_id`, `sequence_index`, `text_content`, `status` (`pending` | `ready` | `error`, tracks per-chunk background generation), `audio_key` (bucket key), `timing_data` (JSON: `{words: [{word, charStart, charEnd, startMs, endMs}]}`), `duration_seconds`
+- **documents**: `id`, `title`, `source_type` (`pdf` | `docx` | `txt` | `epub` | `scan` | `url`), `original_file_key` (bucket key, not a generic URL), `voice_id` (FK → voices), `status` (`processing` | `ready` | `error`), `error_message`, `last_position` (JSON: `{chunkSequenceIndex, timeSeconds}`), `summary` (Phase 4, cached on first generation), `page_layout` (PDF-only JSON: `{pages: [{pageNumber, width, height}], words: [{charStart, charEnd, page, x, y, width, height}]}`, fractional bounding boxes per word for the Page view reader — `null` for non-PDF documents and PDFs imported before this existed), `created_at`
+- **chunks**: `id`, `document_id`, `sequence_index`, `text_content`, `char_start` (this chunk's starting offset within the document's full extracted text — used with `documents.page_layout` to map a chunk's TTS word timing onto a position on the rendered PDF page), `status` (`pending` | `ready` | `error`, tracks per-chunk background generation), `audio_key` (bucket key), `timing_data` (JSON: `{words: [{word, charStart, charEnd, startMs, endMs}]}`), `duration_seconds`
 - **voices**: `id`, `provider` (`elevenlabs`), `provider_voice_id`, `display_name`
 - **reading_sessions**: defined in the schema for future history-beyond-last-position use; not yet written to by any route — `documents.last_position` covers resume for v1.
 

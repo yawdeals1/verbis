@@ -227,6 +227,62 @@ code {
   font-weight: 600;
 }
 
+/* PDF Page view */
+.pdf-page-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem 0 3rem;
+}
+.pdf-page {
+  position: relative;
+  width: 100%;
+  background: #fff;
+  box-shadow: var(--shadow);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pdf-page-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.pdf-word {
+  position: absolute;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.pdf-word:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+.pdf-word-active {
+  background: var(--accent-bg);
+  outline: 2px solid var(--accent-border);
+}
+
+/* Text / Page view toggle */
+.view-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+}
+.view-toggle button {
+  font: inherit;
+  font-size: 0.8rem;
+  border: none;
+  background: none;
+  color: var(--text);
+  border-radius: 4px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+.view-toggle button.active {
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
 /* Playback bar */
 .playback-bar {
   position: sticky;

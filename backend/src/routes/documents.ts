@@ -5,7 +5,8 @@ import { getDocument, listDocuments, updateLastPosition } from '../db/documents.
 import { getChunksForDocument } from '../db/chunks.js'
 import { getVoice } from '../db/voices.js'
 import { getObjectBuffer } from '../storage/index.js'
-import { extractDocxText, extractEpubText, extractPdfText, extractTxtText } from '../services/textExtraction.js'
+import { extractDocxText, extractEpubText, extractTxtText } from '../services/textExtraction.js'
+import { extractPdfLayout } from '../services/pdfLayout.js'
 import { ingestDocument, NoTextExtractedError } from '../services/documentPipeline.js'
 import { scanRouter } from './scan.js'
 import { insightsRouter } from './insights.js'
@@ -20,8 +21,9 @@ documentsRouter.use(insightsRouter)
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
 
+// PDF is handled separately below (extractPdfLayout returns bounding-box
+// data alongside text, which these plain extractors don't).
 const EXTRACTORS: Partial<Record<SourceType, (buffer: Buffer) => Promise<string> | string>> = {
-  pdf: extractPdfText,
   docx: extractDocxText,
   txt: extractTxtText,
   epub: extractEpubText,
@@ -48,24 +50,37 @@ documentsRouter.post('/', upload.single('file'), async (req, res) => {
     return
   }
 
-  const extractor = EXTRACTORS[sourceType]
-  if (!extractor) {
+  if (sourceType !== 'pdf' && !EXTRACTORS[sourceType]) {
     res.status(400).json({ error: `No extractor registered for ${sourceType}` })
     return
   }
 
   try {
-    const extractedText = await extractor(req.file.buffer)
     const title = path.basename(req.file.originalname, path.extname(req.file.originalname))
 
-    const document = await ingestDocument({
-      title,
-      sourceType,
-      fileBuffer: req.file.buffer,
-      fileContentType: req.file.mimetype || 'application/octet-stream',
-      extractedText,
-      voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
-    })
+    const document = await (async () => {
+      if (sourceType === 'pdf') {
+        const { text, pages, words } = await extractPdfLayout(req.file!.buffer)
+        return ingestDocument({
+          title,
+          sourceType,
+          fileBuffer: req.file!.buffer,
+          fileContentType: req.file!.mimetype || 'application/octet-stream',
+          extractedText: text,
+          pageLayout: { pages, words },
+          voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
+        })
+      }
+      const extractedText = await EXTRACTORS[sourceType]!(req.file!.buffer)
+      return ingestDocument({
+        title,
+        sourceType,
+        fileBuffer: req.file!.buffer,
+        fileContentType: req.file!.mimetype || 'application/octet-stream',
+        extractedText,
+        voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
+      })
+    })()
 
     res.status(201).json({ document })
   } catch (err) {
@@ -102,12 +117,31 @@ documentsRouter.get('/:id', async (req, res) => {
       id: chunk.id,
       sequenceIndex: chunk.sequenceIndex,
       textContent: chunk.textContent,
+      charStart: chunk.charStart,
       status: chunk.status,
       durationSeconds: chunk.durationSeconds,
       timingData: chunk.timingData,
       audioUrl: chunk.status === 'ready' ? `/documents/${document.id}/chunks/${chunk.sequenceIndex}/audio` : null,
     })),
   })
+})
+
+documentsRouter.get('/:id/original', async (req, res) => {
+  const document = await getDocument(req.params.id)
+  if (!document) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  try {
+    const buffer = await getObjectBuffer(document.originalFileKey)
+    res.setHeader('Content-Type', document.sourceType === 'pdf' ? 'application/pdf' : 'application/octet-stream')
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    res.send(buffer)
+  } catch (err) {
+    console.error('Failed to load original file:', err)
+    res.status(500).json({ error: 'Failed to load original file' })
+  }
 })
 
 documentsRouter.get('/:id/chunks/:sequenceIndex/audio', async (req, res) => {

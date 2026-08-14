@@ -26,6 +26,16 @@ export default defineConfig({
             },
           },
           {
+            // The original PDF (for Page view) is immutable once uploaded — same caching story as chunk audio.
+            urlPattern: ({ url }: { url: URL }) => /\/documents\/[^/]+\/original$/.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'verbis-original-file',
+              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+          {
             urlPattern: ({ url }: { url: URL }) => /\/documents\/[^/]+$/.test(url.pathname),
             handler: 'NetworkFirst',
             options: {

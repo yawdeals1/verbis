@@ -1,13 +1,22 @@
+import { lazy, Suspense } from 'react'
 import { useParams } from 'react-router-dom'
 import { useReaderPlayback } from '../hooks/useReaderPlayback'
 import { useHighlightGranularity } from '../hooks/useHighlightGranularity'
+import { useLocalStorageState } from '../hooks/useLocalStorageState'
 import ChunkText from '../components/ChunkText'
 import PlaybackBar from '../components/PlaybackBar'
 import DocumentInsights from '../components/DocumentInsights'
 
+// pdfjs-dist is a large dependency (~600kB) — load it only when a PDF's
+// Page view is actually opened, not on every route in the app.
+const PdfPageView = lazy(() => import('../components/PdfPageView'))
+
+type ReaderView = 'text' | 'page'
+
 export default function Reader() {
   const { documentId } = useParams<{ documentId: string }>()
   const [granularity, setGranularity] = useHighlightGranularity()
+  const [view, setView] = useLocalStorageState<ReaderView>('verbis:reader-view', 'page')
   const {
     detail,
     loadError,
@@ -41,6 +50,8 @@ export default function Reader() {
 
   const { document, chunks } = detail
   const readyCount = chunks.filter((c) => c.status === 'ready').length
+  const canShowPageView = document.sourceType === 'pdf' && document.pageLayout !== null
+  const activeView: ReaderView = canShowPageView ? view : 'text'
 
   return (
     <section className="reader">
@@ -77,15 +88,39 @@ export default function Reader() {
             <option value="off">Off</option>
           </select>
         </label>
+
+        {canShowPageView && (
+          <div className="view-toggle" role="group" aria-label="Reader view">
+            <button type="button" className={activeView === 'page' ? 'active' : ''} onClick={() => setView('page')}>
+              Page
+            </button>
+            <button type="button" className={activeView === 'text' ? 'active' : ''} onClick={() => setView('text')}>
+              Text
+            </button>
+          </div>
+        )}
       </div>
 
-      <ChunkText
-        chunks={chunks}
-        activeChunkIndex={chunkIndex}
-        activeWordIndex={wordIndex}
-        granularity={granularity}
-        onWordTap={actions.jumpToWord}
-      />
+      {activeView === 'page' && document.pageLayout ? (
+        <Suspense fallback={<p>Loading page previews…</p>}>
+          <PdfPageView
+            documentId={document.id}
+            pageLayout={document.pageLayout}
+            chunks={chunks}
+            activeChunkIndex={chunkIndex}
+            activeWordIndex={wordIndex}
+            onWordTap={actions.jumpToWord}
+          />
+        </Suspense>
+      ) : (
+        <ChunkText
+          chunks={chunks}
+          activeChunkIndex={chunkIndex}
+          activeWordIndex={wordIndex}
+          granularity={granularity}
+          onWordTap={actions.jumpToWord}
+        />
+      )}
 
       <audio
         ref={audioRef}

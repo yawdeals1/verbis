@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS documents (
   error_message TEXT,
   last_position JSONB,
   summary TEXT,
+  page_layout JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   sequence_index INTEGER NOT NULL,
   text_content TEXT NOT NULL,
+  char_start INTEGER,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'ready', 'error')),
   audio_key TEXT,
   timing_data JSONB,

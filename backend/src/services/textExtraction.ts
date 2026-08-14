@@ -1,20 +1,12 @@
-import { PDFParse } from 'pdf-parse'
 import * as mammoth from 'mammoth'
 import JSZip from 'jszip'
 import { XMLParser } from 'fast-xml-parser'
 import { convert as htmlToText } from 'html-to-text'
 import path from 'node:path'
 
-/** PDF text extraction, preserving reading order per page (PRODUCT_PLAN.md §7). */
-export async function extractPdfText(buffer: Buffer): Promise<string> {
-  const parser = new PDFParse({ data: buffer })
-  try {
-    const result = await parser.getText()
-    return result.pages.map((page) => page.text.trim()).filter(Boolean).join('\n\n')
-  } finally {
-    await parser.destroy()
-  }
-}
+// PDF extraction lives in services/pdfLayout.ts (extractPdfLayout) — it
+// needs pdf.js's raw text-item positions (for word bounding boxes and to
+// fix the letter-spacing bug), which this file's other extractors don't.
 
 /** DOCX text extraction via mammoth, preserving paragraph structure. */
 export async function extractDocxText(buffer: Buffer): Promise<string> {

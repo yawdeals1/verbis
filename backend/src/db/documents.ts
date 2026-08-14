@@ -14,6 +14,7 @@ function mapRow(row: Record<string, unknown>): DocumentRow {
     errorMessage: (row.error_message as string | null) ?? null,
     lastPosition: (row.last_position as LastPosition | null) ?? null,
     summary: (row.summary as string | null) ?? null,
+    pageLayout: (row.page_layout as DocumentRow['pageLayout']) ?? null,
     createdAt: new Date(row.created_at as string).toISOString(),
   }
 }
@@ -23,6 +24,7 @@ export async function createDocument(input: {
   sourceType: SourceType
   originalFileKey: string
   voiceId: string
+  pageLayout?: DocumentRow['pageLayout']
 }): Promise<DocumentRow> {
   const row = await insertRow<Record<string, unknown>>(TABLE, {
     title: input.title,
@@ -30,6 +32,7 @@ export async function createDocument(input: {
     original_file_key: input.originalFileKey,
     voice_id: input.voiceId,
     status: 'processing',
+    page_layout: input.pageLayout ?? null,
   })
   return mapRow(row)
 }

@@ -7,6 +7,28 @@ export interface LastPosition {
   timeSeconds: number
 }
 
+export interface PdfPage {
+  pageNumber: number
+  width: number
+  height: number
+}
+
+export interface PdfWordPosition {
+  charStart: number
+  charEnd: number
+  page: number
+  /** Fractions (0..1) of the page's width/height, top-left origin. */
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface PdfLayout {
+  pages: PdfPage[]
+  words: PdfWordPosition[]
+}
+
 export interface Document {
   id: string
   title: string
@@ -17,6 +39,8 @@ export interface Document {
   errorMessage: string | null
   lastPosition: LastPosition | null
   summary: string | null
+  /** PDF-only — null for other source types and for PDFs imported before this existed. */
+  pageLayout: PdfLayout | null
   createdAt: string
 }
 
@@ -36,6 +60,8 @@ export interface ChunkSummary {
   id: string
   sequenceIndex: number
   textContent: string
+  /** This chunk's starting offset within the document's full extracted text — pairs with Document.pageLayout.words to position highlights on the rendered PDF page. Null when the source has no page layout. */
+  charStart: number | null
   status: ChunkStatus
   durationSeconds: number | null
   timingData: TimingData | null

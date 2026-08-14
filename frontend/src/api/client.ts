@@ -109,3 +109,7 @@ export function askQuestion(documentId: string, question: string) {
 export function chunkAudioUrl(documentId: string, sequenceIndex: number): string {
   return `${API_BASE_URL}/documents/${documentId}/chunks/${sequenceIndex}/audio`
 }
+
+export function originalFileUrl(documentId: string): string {
+  return `${API_BASE_URL}/documents/${documentId}/original`
+}
