@@ -186,6 +186,91 @@ export function mergeLetterRuns(line: Fragment[]): WordToken[] {
 interface PageLineData {
   tokens: WordToken[]
   yTop: number
+  /** First line of a detected section (row) or column — forces a paragraph break downstream, since a plain y-gap check can't tell "next column" from "next line" once reading order stops being monotonic in y. */
+  blockStart: boolean
+}
+
+/** Gap (relative to the page's typical fragment height) big enough to mark a section break rather than ordinary line spacing. */
+const BAND_GAP_FACTOR = 1.8
+/** Gap (relative to typical fragment height) big enough to mark a column gutter. Much larger than a word space or the letter-run gap ratios above, which operate within a single line. */
+const COLUMN_GAP_FACTOR = 2.5
+/** A column candidate must span at least this fraction of its band's height to count as a real column, not one stray indented fragment. */
+const MIN_COLUMN_HEIGHT_COVERAGE = 0.3
+
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0
+  const sorted = [...nums].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+/** Merges sorted-ascending [start, end] intervals wherever they overlap or touch. */
+function mergeCoveredIntervals(intervals: [number, number][]): [number, number][] {
+  const sorted = [...intervals].sort((a, b) => a[0] - b[0])
+  const merged: [number, number][] = [sorted[0]]
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1]
+    if (sorted[i][0] <= last[1]) last[1] = Math.max(last[1], sorted[i][1])
+    else merged.push(sorted[i])
+  }
+  return merged
+}
+
+/**
+ * Splits a page's fragments into vertical bands (rows/sections) using a
+ * projection of what y-ranges have any text at all — a gap in that
+ * projection much bigger than ordinary line spacing marks a section break
+ * (e.g. the whitespace between a heading and a row of cards below it).
+ * Returns bands in top-to-bottom reading order.
+ */
+function splitIntoBands(fragments: Fragment[]): Fragment[][] {
+  if (fragments.length === 0) return []
+  const lineHeight = median(fragments.map((f) => f.height)) || 1
+  const covered = mergeCoveredIntervals(fragments.map((f): [number, number] => [f.yTop, f.yTop + f.height]))
+
+  const bands: [number, number][] = [covered[0]]
+  for (let i = 1; i < covered.length; i++) {
+    const gap = covered[i][0] - bands[bands.length - 1][1]
+    if (gap > lineHeight * BAND_GAP_FACTOR) bands.push(covered[i])
+    else bands[bands.length - 1][1] = Math.max(bands[bands.length - 1][1], covered[i][1])
+  }
+
+  // y-up coordinates: higher yTop reads first, so top-to-bottom is descending.
+  bands.sort((a, b) => b[1] - a[1])
+  return bands.map(([bottom, top]) => fragments.filter((f) => f.yTop >= bottom - 0.01 && f.yTop + f.height <= top + 0.01))
+}
+
+/**
+ * Splits one band into left-to-right columns using the same projection
+ * technique on the x-axis — a wide horizontal gap spanning most of the
+ * band's height marks a column gutter (e.g. two cards sitting side by
+ * side). Falls back to a single column (the whole band, unchanged) unless
+ * a clean 2+-way split is found, so ordinary single-column text is
+ * unaffected.
+ */
+function splitBandIntoColumns(fragments: Fragment[]): Fragment[][] {
+  if (fragments.length === 0) return [fragments]
+  const lineHeight = median(fragments.map((f) => f.height)) || 1
+  const bandTop = Math.max(...fragments.map((f) => f.yTop + f.height))
+  const bandBottom = Math.min(...fragments.map((f) => f.yTop))
+  const bandHeight = bandTop - bandBottom || 1
+
+  const covered = mergeCoveredIntervals(fragments.map((f): [number, number] => [f.x, f.x + f.width]))
+  const columnRanges: [number, number][] = [covered[0]]
+  for (let i = 1; i < covered.length; i++) {
+    const gap = covered[i][0] - columnRanges[columnRanges.length - 1][1]
+    if (gap > lineHeight * COLUMN_GAP_FACTOR) columnRanges.push(covered[i])
+    else columnRanges[columnRanges.length - 1][1] = Math.max(columnRanges[columnRanges.length - 1][1], covered[i][1])
+  }
+  if (columnRanges.length < 2) return [fragments]
+
+  const columns = columnRanges.map(([left, right]) => fragments.filter((f) => f.x >= left - 0.01 && f.x + f.width <= right + 0.01))
+  const spansEnoughHeight = columns.every((col) => {
+    const top = Math.max(...col.map((f) => f.yTop + f.height))
+    const bottom = Math.min(...col.map((f) => f.yTop))
+    return (top - bottom) / bandHeight >= MIN_COLUMN_HEIGHT_COVERAGE
+  })
+  return spansEnoughHeight ? columns : [fragments]
 }
 
 async function extractPageLines(page: pdfjsLib.PDFPageProxy): Promise<{ lines: PageLineData[]; width: number; height: number }> {
@@ -198,10 +283,21 @@ async function extractPageLines(page: pdfjsLib.PDFPageProxy): Promise<{ lines: P
     fragments.push(...itemToFragments(item))
   }
 
-  const lines = groupIntoLines(fragments).map((line) => ({
-    tokens: mergeLetterRuns(line),
-    yTop: line[0].yTop,
-  }))
+  // Reading order isn't simply top-to-bottom across the full page width —
+  // side-by-side blocks (e.g. two cards in a row) need to be read fully
+  // before moving to the next one, not interleaved by y position the way a
+  // single global sort would. Band the page into rows, then split each row
+  // into columns where the fragments clearly form separate blocks; each
+  // band/column is grouped into lines independently so cross-column
+  // fragments never end up sorted into the same line.
+  const lines: PageLineData[] = []
+  for (const band of splitIntoBands(fragments)) {
+    for (const column of splitBandIntoColumns(band)) {
+      groupIntoLines(column).forEach((line, i) => {
+        lines.push({ tokens: mergeLetterRuns(line), yTop: line[0].yTop, blockStart: i === 0 })
+      })
+    }
+  }
 
   return { lines, width: viewport.width, height: viewport.height }
 }
@@ -297,14 +393,23 @@ export async function extractPdfLayout(buffer: Buffer): Promise<PdfLayout> {
 
     pageLines.forEach((lines, pageIndex) => {
       const page = pages[pageIndex]
+      // Column transitions jump back upward in y (the next column's first
+      // line starts higher than the previous column's last line), so those
+      // gaps would corrupt a "typical line spacing" measure — exclude them
+      // (blockStart already forces a paragraph break there regardless).
       const gaps: number[] = []
-      for (let i = 1; i < lines.length; i++) gaps.push(lines[i - 1].yTop - lines[i].yTop)
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i].blockStart) continue
+        gaps.push(lines[i - 1].yTop - lines[i].yTop)
+      }
       const medianGap = gaps.length ? [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : 0
 
       lines.forEach((line, lineIndex) => {
         const isFirstLineOfPage = lineIndex === 0
         const gapFromPrev = lineIndex > 0 ? lines[lineIndex - 1].yTop - line.yTop : 0
-        const isNewParagraph = isFirstLineOfPage ? pageIndex > 0 : medianGap > 0 && gapFromPrev > medianGap * PARAGRAPH_GAP_FACTOR
+        const isNewParagraph = isFirstLineOfPage
+          ? pageIndex > 0
+          : line.blockStart || (medianGap > 0 && gapFromPrev > medianGap * PARAGRAPH_GAP_FACTOR)
 
         if (text.length > 0) text += isNewParagraph ? '\n\n' : ' '
 
