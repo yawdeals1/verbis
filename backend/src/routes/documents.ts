@@ -162,7 +162,31 @@ documentsRouter.get('/:id/chunks/:sequenceIndex/audio', async (req, res) => {
     const buffer = await getObjectBuffer(chunk.audioKey)
     res.setHeader('Content-Type', 'audio/mpeg')
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
-    res.send(buffer)
+    // <audio> elements need Range support to seek — without it, the browser
+    // marks the resource as unseekable after its initial probe request and
+    // silently drops any later `currentTime` assignment (tap-to-jump lands
+    // back at 0 instead of the tapped word).
+    res.setHeader('Accept-Ranges', 'bytes')
+
+    const range = req.headers.range
+    if (!range) {
+      res.setHeader('Content-Length', buffer.length)
+      res.send(buffer)
+      return
+    }
+
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range)
+    const start = match?.[1] ? Number(match[1]) : 0
+    const end = match?.[2] ? Number(match[2]) : buffer.length - 1
+    if (!match || start > end || end >= buffer.length) {
+      res.status(416).setHeader('Content-Range', `bytes */${buffer.length}`).end()
+      return
+    }
+
+    res.status(206)
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${buffer.length}`)
+    res.setHeader('Content-Length', end - start + 1)
+    res.send(buffer.subarray(start, end + 1))
   } catch (err) {
     console.error('Failed to load chunk audio:', err)
     res.status(500).json({ error: 'Failed to load audio' })
