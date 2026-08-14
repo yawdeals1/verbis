@@ -79,21 +79,21 @@ Summarization and lightweight document Q&A are implemented (local Ollama model �
 
 ### Implementation status
 
-All of Phase 1–4 above is built (`backend/src/`, `frontend/src/`) except multi-device sync (see note above). What's still required before it runs against real infrastructure:
+All of Phase 1–4 above is built (`backend/src/`, `frontend/src/`) except multi-device sync (see note above), **deployed, and live at `https://verbis.deploro.app`**.
 
-- Fill in `backend/.env` (copied from `.env.example`): `ELEVENLABS_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `DEPLORO_API_URL`/`DEPLORO_API_TOKEN` (from `deploro token create --project verbis`), and leave `S3_*` blank for local disk storage.
-- Install [Ollama](https://ollama.com), run `ollama pull gemma4` (or a variant: `gemma4:e2b`/`e4b`/`26b`/`31b`), and `ollama serve` — `OLLAMA_BASE_URL`/`OLLAMA_MODEL` in `.env` default to `http://localhost:11434`/`gemma4`.
-- Apply the schema once via the Deploro CLI (`deploro db create`, then `deploro migrate create init --up-file backend/src/db/schema.sql` + `deploro migrate apply init`) — not something the running app does itself.
-- Database-layer functions (`db/documents.ts`/`db/chunks.ts`/`db/voices.ts`, backed by `db/studioClient.ts`) were verified end-to-end against the real `verbis` project's Studio API — full CRUD, JSONB round-tripping, and the upsert-voice emulation all confirmed working. `tsc --noEmit`/`tsc -b` pass on both projects, and a clean `vite build` validates the PWA/workbox config. ElevenLabs/Cloud Vision/Ollama routes still haven't been exercised end-to-end against real provider responses — do that once those keys are filled in.
+- `backend/.env` is filled in with real values: `ELEVENLABS_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS_JSON` (base64 service account key — set this rather than the file-path `GOOGLE_APPLICATION_CREDENTIALS` in any environment where `vps set-env` is the only way to inject secrets, since it can't upload files), `DEPLORO_API_URL`/`DEPLORO_API_TOKEN`, `OLLAMA_BASE_URL=https://ollama.com` with `OLLAMA_API_KEY` (the deployed backend can't reach a `localhost` Ollama instance, so production uses Ollama's direct cloud API instead of a local relay).
+- Database-layer functions (`db/documents.ts`/`db/chunks.ts`/`db/voices.ts`, backed by `db/studioClient.ts`), ElevenLabs TTS + word-boundary derivation, Google Cloud Vision OCR, and Ollama summarize/Q&A were all verified end-to-end against real provider responses — not just type-checked. The full scan → OCR → chunk → TTS → store pipeline was exercised live against the deployed app with a real image and produced a real playable audio chunk with correct word-level timing.
+- `tsc --noEmit`/`tsc -b` pass on both projects; a clean `vite build` validates the PWA/workbox config.
+- Deploy topology: Deploro VPS compute, one project-wide public port (`frontend`, bound to `127.0.0.1:18080`, proxied by Deploro's own edge to `https://verbis.deploro.app`) — `backend` has no public port at all, reached only via nginx's internal `/api/*` proxy. See `deploro.compose.yml` for the full compose stack and why (VPS ports must bind to `127.0.0.1` on a distinct high port, never `0.0.0.0:80` — that's owned by Deploro's own shared edge nginx across every project on the box).
 
 ## 6. Environment/Secrets Checklist
 
-- [ ] ElevenLabs API key → `backend/.env` `ELEVENLABS_API_KEY`
-- [ ] Google Cloud Vision service account credentials → `GOOGLE_APPLICATION_CREDENTIALS` (path to the JSON key)
-- [ ] Ollama running locally with `gemma4` pulled → `OLLAMA_BASE_URL`/`OLLAMA_MODEL` (Phase 4 summarize/Q&A, no API key)
+- [x] ElevenLabs API key → `backend/.env` `ELEVENLABS_API_KEY`; also set on VPS via `deploro vps set-env`
+- [x] Google Cloud Vision service account credentials → `GOOGLE_APPLICATION_CREDENTIALS_JSON` (base64), set both locally and via `deploro vps set-env`
+- [x] Ollama → production uses the direct cloud API (`OLLAMA_BASE_URL=https://ollama.com` + `OLLAMA_API_KEY`), not a local relay, since the VPS can't reach `localhost` on the dev machine
 - [x] Deploro `verbis` project database → `deploro db create` + `deploro migrate create/apply` against `backend/src/db/schema.sql`; app reaches it via `DEPLORO_API_URL`/`DEPLORO_API_TOKEN`, no direct Postgres connection
-- [ ] S3-compatible bucket (optional until then) → `S3_ENDPOINT`/`S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`; leave blank to use local disk storage under `backend/storage/` in the meantime
-- [ ] `deploro vps deploy` for both the backend and frontend (`deploro.compose.yml`), with the above secrets injected via `deploro vps set-env` — server-side only, never shipped to the PWA client
+- [ ] S3-compatible bucket (optional) → `S3_ENDPOINT`/`S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`; currently unset, using local disk storage under `backend/storage/` (a named Docker volume on the VPS, so it survives redeploys)
+- [x] `deploro vps deploy` for both the backend and frontend (`deploro.compose.yml`), with the above secrets injected via `deploro vps set-env` — server-side only, never shipped to the PWA client. Live at `https://verbis.deploro.app`.
 
 ## 7. Open Flags
 
