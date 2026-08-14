@@ -2,12 +2,16 @@
 # the Express API and the built static PWA behind nginx, as two services in
 # the VPS compute stack.
 #
-# Deploro's VPS deploy exposes exactly one public HTTP port per project
-# (see PRODUCT_PLAN.md) — so `frontend` is the only service with a
-# published port, and its nginx config (frontend/nginx.conf) proxies
-# `/api/*` to `backend` over the compose-internal network. That's also why
-# VITE_API_BASE_URL is the fixed relative path `/api` rather than an
-# absolute URL: the frontend never needs to know the deployment's public
+# Deploro's shared VPS already owns host ports 80/443 itself (its own nginx
+# provides the https://<slug>.deploro.app routing across every project on
+# the box) — a project's own compose file must bind its web port to
+# 127.0.0.1 on a distinct high port, never 0.0.0.0:80, or `docker compose
+# up` fails with "address already in use" (confirmed by inspecting another
+# project's working deploy: 127.0.0.1:8080->8080/tcp). `frontend` is the
+# only service with a published port; its nginx config (frontend/nginx.conf)
+# proxies `/api/*` to `backend` over the compose-internal network. That's
+# also why VITE_API_BASE_URL is the fixed relative path `/api` rather than
+# an absolute URL: the frontend never needs to know the deployment's public
 # domain, in dev or in prod.
 #
 # Env vars come from Deploro's per-project VPS env (`deploro vps set-env`).
@@ -50,7 +54,7 @@ services:
       args:
         VITE_API_BASE_URL: /api
     ports:
-      - "80:80"
+      - "127.0.0.1:18080:80"
     restart: unless-stopped
     depends_on:
       - backend
