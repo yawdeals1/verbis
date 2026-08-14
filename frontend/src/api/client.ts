@@ -95,6 +95,10 @@ export function updatePosition(documentId: string, chunkSequenceIndex: number, t
   })
 }
 
+export function deleteDocument(documentId: string) {
+  return request<void>(`/documents/${documentId}`, { method: 'DELETE' })
+}
+
 export function getSummary(documentId: string) {
   return request<{ summary: string }>(`/documents/${documentId}/summary`, { method: 'POST' })
 }

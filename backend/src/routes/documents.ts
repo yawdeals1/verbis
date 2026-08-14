@@ -1,10 +1,10 @@
 import { Router } from 'express'
 import multer from 'multer'
 import path from 'node:path'
-import { getDocument, listDocuments, updateLastPosition } from '../db/documents.js'
+import { deleteDocument, getDocument, listDocuments, updateLastPosition } from '../db/documents.js'
 import { getChunksForDocument } from '../db/chunks.js'
 import { getVoice } from '../db/voices.js'
-import { getObjectBuffer } from '../storage/index.js'
+import { deleteObject, getObjectBuffer } from '../storage/index.js'
 import { extractDocxText, extractEpubText, extractTxtText } from '../services/textExtraction.js'
 import { extractPdfLayout } from '../services/pdfLayout.js'
 import { ingestDocument, NoTextExtractedError } from '../services/documentPipeline.js'
@@ -167,6 +167,28 @@ documentsRouter.get('/:id/chunks/:sequenceIndex/audio', async (req, res) => {
     console.error('Failed to load chunk audio:', err)
     res.status(500).json({ error: 'Failed to load audio' })
   }
+})
+
+documentsRouter.delete('/:id', async (req, res) => {
+  const document = await getDocument(req.params.id)
+  if (!document) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  const chunks = await getChunksForDocument(document.id)
+  const audioKeys = chunks.map((c) => c.audioKey).filter((key): key is string => key !== null)
+
+  // Best-effort: a storage object already missing (or a transient bucket
+  // error) shouldn't block removing the document itself.
+  await Promise.all(
+    [document.originalFileKey, ...audioKeys].map((key) =>
+      deleteObject(key).catch((err) => console.error(`Failed to delete storage object ${key}:`, err)),
+    ),
+  )
+
+  await deleteDocument(document.id)
+  res.status(204).send()
 })
 
 documentsRouter.patch('/:id/position', async (req, res) => {

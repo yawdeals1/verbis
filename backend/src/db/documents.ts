@@ -1,4 +1,4 @@
-import { getRow, insertRow, listRows, updateRow } from './studioClient.js'
+import { deleteRow, getRow, insertRow, listRows, updateRow } from './studioClient.js'
 import type { DocumentRow, DocumentStatus, LastPosition, SourceType } from './types.js'
 
 const TABLE = 'documents'
@@ -61,4 +61,9 @@ export async function updateLastPosition(id: string, position: LastPosition): Pr
 
 export async function updateSummary(id: string, summary: string): Promise<void> {
   await updateRow(TABLE, id, { summary })
+}
+
+/** Deletes the document row — chunks cascade via the DB's ON DELETE CASCADE FK. Storage cleanup (original file, chunk audio) is the caller's responsibility, since that lives outside the DB. */
+export async function deleteDocument(id: string): Promise<void> {
+  await deleteRow(TABLE, id)
 }

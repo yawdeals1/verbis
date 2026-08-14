@@ -1,5 +1,5 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { env } from '../config/env.js'
@@ -64,4 +64,14 @@ export async function getObjectBuffer(key: string): Promise<Buffer> {
   }
 
   return readFile(localPath(key))
+}
+
+/** Deletes one stored object. Missing objects are not an error — deleting a document should succeed even if a file was already gone. */
+export async function deleteObject(key: string): Promise<void> {
+  if (env.s3Configured) {
+    await getS3Client().send(new DeleteObjectCommand({ Bucket: env.s3Bucket, Key: key }))
+    return
+  }
+
+  await rm(localPath(key), { force: true })
 }

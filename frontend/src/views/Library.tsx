@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { listDocuments } from '../api/client'
+import { deleteDocument, listDocuments } from '../api/client'
 import type { Document } from '../api/types'
 
 function statusLabel(document: Document): string {
@@ -9,15 +9,36 @@ function statusLabel(document: Document): string {
   return document.lastPosition ? 'Reading in progress' : 'Ready'
 }
 
+function statusClass(document: Document): string {
+  if (document.status === 'processing') return 'processing'
+  if (document.status === 'error') return 'error'
+  return 'ready'
+}
+
 export default function Library() {
   const [documents, setDocuments] = useState<Document[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     listDocuments()
       .then((res) => setDocuments(res.documents))
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load library'))
   }, [])
+
+  const handleDelete = async (doc: Document) => {
+    if (!window.confirm(`Delete "${doc.title}"? This permanently removes it and its generated audio.`)) return
+
+    setDeletingId(doc.id)
+    try {
+      await deleteDocument(doc.id)
+      setDocuments((docs) => docs?.filter((d) => d.id !== doc.id) ?? docs)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete document')
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   return (
     <section>
@@ -32,18 +53,30 @@ export default function Library() {
         <p>No documents yet. Import a PDF, DOCX, or scan a book page to get started.</p>
       )}
 
-      <ul className="library-list">
+      <div className="library-grid">
         {documents?.map((doc) => (
-          <li key={doc.id}>
-            <Link to={`/reader/${doc.id}`}>
-              <strong>{doc.title}</strong>
+          <div className="library-card" key={doc.id}>
+            <Link to={`/reader/${doc.id}`} className={`library-card-tile status-${statusClass(doc)}`}>
+              <span className="library-card-tile-type">{doc.sourceType.toUpperCase()}</span>
             </Link>
-            <span className="library-item-meta">
-              {doc.sourceType.toUpperCase()} · {statusLabel(doc)} · {new Date(doc.createdAt).toLocaleDateString()}
-            </span>
-          </li>
+            <div className="library-card-info">
+              <Link to={`/reader/${doc.id}`} className="library-card-title">
+                {doc.title}
+              </Link>
+              <p className="library-card-meta">{statusLabel(doc)}</p>
+              <p className="library-card-meta">{new Date(doc.createdAt).toLocaleDateString()}</p>
+              <button
+                type="button"
+                className="library-card-delete"
+                onClick={() => handleDelete(doc)}
+                disabled={deletingId === doc.id}
+              >
+                {deletingId === doc.id ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
         ))}
-      </ul>
+      </div>
     </section>
   )
 }

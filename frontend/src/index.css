@@ -155,22 +155,88 @@ code {
   padding: 2px 8px;
 }
 
-/* Library */
-.library-list {
-  list-style: none;
-  padding: 0;
+/* Library — a grid of tiles, each a square "channel" preview with an info
+   box underneath (title, status, date, delete), rather than a plain list. */
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1.5rem;
   text-align: left;
+  padding: 0.5rem 0 2rem;
 }
-.library-list li {
+.library-card {
+  display: flex;
+  flex-direction: column;
+}
+.library-card-tile {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--code-bg);
+  border: 2px solid var(--border);
+  text-decoration: none;
+  transition: border-color 0.15s ease;
+}
+.library-card-tile:hover {
+  border-color: var(--accent-border);
+}
+.library-card-tile.status-error {
+  border-color: #e05252;
+}
+.library-card-tile.status-processing {
+  border-color: #d9a441;
+}
+.library-card-tile-type {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-h);
+}
+.library-card-info {
+  margin-top: 0.6rem;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border);
 }
-.library-item-meta {
-  font-size: 0.8rem;
+.library-card-title {
+  font-weight: 600;
+  color: var(--text-h);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-card-title:hover {
+  text-decoration: underline;
+}
+.library-card-meta {
+  margin: 0;
+  font-size: 0.78rem;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-card-delete {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+  font: inherit;
+  font-size: 0.78rem;
+  color: #e05252;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+}
+.library-card-delete:hover:not(:disabled) {
+  border-color: #e05252;
+}
+.library-card-delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Reader */

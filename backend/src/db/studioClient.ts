@@ -73,3 +73,9 @@ export async function updateRow<T>(table: string, id: string, data: Record<strin
   const result = (await response.json()) as { row: T }
   return result.row
 }
+
+export async function deleteRow(table: string, id: string): Promise<void> {
+  const response = await rawRequest(`/${table}/${id}`, { method: 'DELETE' })
+  if (response.status === 404) return
+  await assertOk(response, `delete ${table}/${id}`)
+}
