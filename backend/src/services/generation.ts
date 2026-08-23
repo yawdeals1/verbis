@@ -8,9 +8,39 @@ function audioKeyFor(documentId: string, sequenceIndex: number): string {
   return `audio/${documentId}/${sequenceIndex}.mp3`
 }
 
+const MAX_SYNTHESIS_ATTEMPTS = 3
+const RETRY_DELAY_MS = 20_000
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Retries a chunk whose synthesis died mid-request.
+ *
+ * A self-hosted TTS container is a process that can be killed and restarted,
+ * unlike a metered API that answers or returns an error — when it goes down
+ * the socket simply closes with no response, and the next request after it
+ * comes back up succeeds. The delay covers the container restarting plus
+ * reloading and warming the model (~8-10s observed), so a retry lands on a
+ * ready process rather than a refused connection.
+ */
+async function synthesizeWithRetry(text: string, voiceProviderVoiceId: string) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await synthesizeChunk(text, voiceProviderVoiceId)
+    } catch (err) {
+      if (attempt >= MAX_SYNTHESIS_ATTEMPTS) throw err
+      console.warn(
+        `[tts] synthesis attempt ${attempt}/${MAX_SYNTHESIS_ATTEMPTS} failed, retrying in ${RETRY_DELAY_MS}ms:`,
+        err instanceof Error ? err.message : err,
+      )
+      await sleep(RETRY_DELAY_MS)
+    }
+  }
+}
+
 /** Synthesizes one chunk's audio + timing and persists both. Throws on failure. */
 export async function generateChunk(chunk: ChunkRow, voiceProviderVoiceId: string): Promise<void> {
-  const { audioBuffer, timing, durationSeconds } = await synthesizeChunk(
+  const { audioBuffer, timing, durationSeconds } = await synthesizeWithRetry(
     chunk.textContent,
     voiceProviderVoiceId,
   )

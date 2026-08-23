@@ -76,6 +76,15 @@ services:
       OMP_NUM_THREADS: "2"
       MKL_NUM_THREADS: "2"
       WEB_CONCURRENCY: "1"
+      # Upstream issue #453: each request does a voice-tensor round trip that
+      # leaves ~20-30MB of transient allocations behind, fragmenting the heap
+      # so RSS climbs monotonically and never returns. glibc makes that worse
+      # by giving every thread its own arena, so freed blocks in one arena
+      # cannot satisfy an allocation in another. Capping the arena count is
+      # the standard mitigation and matches what we see: synthesis succeeds
+      # on a freshly restarted container and dies once requests have
+      # accumulated, regardless of how short the text is.
+      MALLOC_ARENA_MAX: "2"
     restart: unless-stopped
     cpus: 2.0
     mem_limit: 4g
