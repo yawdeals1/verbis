@@ -85,22 +85,22 @@ services:
       # on a freshly restarted container and dies once requests have
       # accumulated, regardless of how short the text is.
       MALLOC_ARENA_MAX: "2"
-      # Kokoro re-splits whatever text it is given into its own sub-chunks and
-      # runs one forward pass per sub-chunk, so OUR chunk size does not bound
-      # the largest allocation — these do. Measured against this VPS: 109-token
-      # passes return 200 OK, 145-token passes were SIGKILLed on 4 of 4 freshly
-      # warmed containers, and the upstream defaults (175/250/450) produced a
-      # 282-token pass that died just as reliably.
+      # Kokoro leaks ~20-30MB per SUB-chunk (upstream #453: each one does a
+      # voice-tensor round trip whose transient allocations never return), and
+      # it re-splits every request into sub-chunks of its own. On a host with
+      # ~210MB free and no swap, that means a request dies partway through —
+      # observed dying after 2 sub-chunks, then after 4, having synthesized the
+      # earlier ones fine. Peak pass size is NOT the trigger: 42-token passes
+      # died, while every request that ever succeeded was a single sub-chunk.
       #
-      # ABSOLUTE_MAX_TOKENS is the one that actually matters. smart_split only
-      # breaks at sentence boundaries until this cap forces it, so text with no
-      # sentence punctuation — a table of contents, a heading list — runs
-      # straight to the absolute ceiling no matter what TARGET_MAX_TOKENS says.
-      # That is exactly the front matter most documents open with, which is why
-      # it kept being chunk 1 that failed.
-      TARGET_MIN_TOKENS: "40"
-      TARGET_MAX_TOKENS: "80"
-      ABSOLUTE_MAX_TOKENS: "100"
+      # So these are set HIGH on purpose, the opposite of the obvious reading.
+      # Combined with a small MAX_CHUNK_CHARS, they guarantee one sub-chunk per
+      # request — one voice-tensor round trip, one leak increment — instead of
+      # several. Lowering them splits requests further and kills the container
+      # sooner.
+      TARGET_MIN_TOKENS: "100"
+      TARGET_MAX_TOKENS: "250"
+      ABSOLUTE_MAX_TOKENS: "300"
     restart: unless-stopped
     cpus: 2.0
     mem_limit: 4g

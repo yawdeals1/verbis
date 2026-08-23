@@ -1,9 +1,9 @@
-// Sized for time-to-first-audio, not for the TTS request size (Kokoro
-// sub-splits internally — see TARGET_MAX_TOKENS in deploro.compose.yml).
-// Self-hosted CPU synthesis runs at well under realtime on a shared box, so
-// a 1000-char chunk meant a couple of minutes before playback could start,
-// and lost that much work whenever a chunk had to be retried.
-const MAX_CHUNK_CHARS = 400
+// Sized so Kokoro never splits a request into more than one sub-chunk, which
+// is what actually keeps synthesis alive on this host — see the token settings
+// in deploro.compose.yml. Small enough that even number-heavy text (a "1.1"
+// phonemizes to three tokens) stays under one pass, which costs a lot of
+// chunks per document but is the difference between audio and no audio.
+const MAX_CHUNK_CHARS = 90
 
 const SENTENCE_SPLIT = /(?<=[.!?])\s+(?=[A-Z0-9"'“(])/
 
