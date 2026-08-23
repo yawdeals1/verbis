@@ -2,10 +2,44 @@ import { env } from '../config/env.js'
 import type { WordTiming } from '../types/timing.js'
 import type { SynthesizeResult, VoiceOption } from './ttsTypes.js'
 
+/**
+ * Kokoro spells these `start_time`/`end_time`. The project README documents
+ * them as `start`/`end`, which is what this originally read — the mismatch
+ * is silent rather than loud, because the missing field yields NaN through
+ * Math.round and JSON serializes that to null, so chunks generate and play
+ * with every highlight timestamp quietly empty. Both spellings are accepted
+ * so a version that returns either keeps working.
+ */
 interface KokoroTimestamp {
   word: string
-  start: number
-  end: number
+  start_time?: number
+  end_time?: number
+  start?: number
+  end?: number
+}
+
+interface WordSpan {
+  word: string
+  startSeconds: number
+  endSeconds: number
+}
+
+function finiteNumber(...candidates: (number | undefined)[]): number | null {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate
+  }
+  return null
+}
+
+function toWordSpans(timestamps: KokoroTimestamp[]): WordSpan[] {
+  const spans: WordSpan[] = []
+  for (const stamp of timestamps) {
+    const startSeconds = finiteNumber(stamp.start_time, stamp.start)
+    const endSeconds = finiteNumber(stamp.end_time, stamp.end)
+    if (startSeconds === null || endSeconds === null) continue
+    spans.push({ word: stamp.word, startSeconds, endSeconds })
+  }
+  return spans
 }
 
 interface CaptionedSpeechResponse {
@@ -38,7 +72,7 @@ const MATCH_LOOKAHEAD = 3
 
 /**
  * Anchors Kokoro's per-word timings back onto the chunk's own character
- * offsets. Kokoro returns `{word, start, end}` with no character positions,
+ * offsets. Kokoro returns words with times but no character positions,
  * but tap-to-jump resolves a tapped word through `charStart`/`charEnd`
  * (types/timing.ts) — so the source text stays the authority for offsets and
  * Kokoro is only the authority for time.
@@ -51,9 +85,9 @@ const MATCH_LOOKAHEAD = 3
  * non-decreasing — findWordIndex() in useReaderPlayback.ts scans linearly
  * and depends on that ordering.
  */
-function alignTimingsToSource(text: string, timestamps: KokoroTimestamp[]): WordTiming[] {
+function alignTimingsToSource(text: string, spans: WordSpan[]): WordTiming[] {
   const sourceWords = tokenizeSourceWords(text)
-  if (sourceWords.length === 0 || timestamps.length === 0) return []
+  if (sourceWords.length === 0 || spans.length === 0) return []
 
   const words: WordTiming[] = []
   let cursor = 0
@@ -62,22 +96,22 @@ function alignTimingsToSource(text: string, timestamps: KokoroTimestamp[]): Word
     const target = comparable(sourceWord.text)
 
     let matchIndex = -1
-    for (let offset = 0; offset <= MATCH_LOOKAHEAD && cursor + offset < timestamps.length; offset++) {
-      if (comparable(timestamps[cursor + offset].word) === target) {
+    for (let offset = 0; offset <= MATCH_LOOKAHEAD && cursor + offset < spans.length; offset++) {
+      if (comparable(spans[cursor + offset].word) === target) {
         matchIndex = cursor + offset
         break
       }
     }
 
-    const chosen = matchIndex === -1 ? Math.min(cursor, timestamps.length - 1) : matchIndex
-    const stamp = timestamps[chosen]
+    const chosen = matchIndex === -1 ? Math.min(cursor, spans.length - 1) : matchIndex
+    const span = spans[chosen]
 
     words.push({
       word: sourceWord.text,
       charStart: sourceWord.charStart,
       charEnd: sourceWord.charEnd,
-      startMs: Math.round(stamp.start * 1000),
-      endMs: Math.round(stamp.end * 1000),
+      startMs: Math.round(span.startSeconds * 1000),
+      endMs: Math.round(span.endSeconds * 1000),
     })
 
     cursor = chosen + 1
@@ -179,11 +213,22 @@ export async function synthesizeChunk(text: string, voiceId: string): Promise<Sy
   if (!data.audio) throw new Error('Kokoro TTS returned no audio')
 
   const audioBuffer = Buffer.from(data.audio, 'base64')
-  const timestamps = data.timestamps ?? []
-  const words = alignTimingsToSource(text, timestamps)
+  const spans = toWordSpans(data.timestamps ?? [])
+
+  // Loud on purpose. Audio without timing still plays, so this would
+  // otherwise surface as a document that reads aloud with no highlighting
+  // and no error anywhere — and synced highlighting is the feature this app
+  // exists for, so a chunk that cannot be highlighted is a failed chunk.
+  if (spans.length === 0) {
+    throw new Error(
+      `Kokoro returned ${data.timestamps?.length ?? 0} timestamps with no usable start/end times`,
+    )
+  }
+
+  const words = alignTimingsToSource(text, spans)
 
   const framedDuration = mp3DurationSeconds(audioBuffer)
-  const durationSeconds = framedDuration > 0 ? framedDuration : timestamps[timestamps.length - 1]?.end ?? 0
+  const durationSeconds = framedDuration > 0 ? framedDuration : spans[spans.length - 1].endSeconds
 
   return { audioBuffer, timing: { words }, durationSeconds }
 }
