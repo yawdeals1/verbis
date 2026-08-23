@@ -55,28 +55,27 @@ services:
   # compose-internal network at http://kokoro:8880 — no published port, same
   # as `backend`.
   #
-  # PARKED behind a compose profile: defined here, but deliberately NOT
-  # started by a normal `deploro vps deploy`. It came up healthy and stayed
-  # healthy idle (~1.1GB resident, 68 voice packs, model warmed in 8.4s), and
-  # /v1/audio/voices served fine — but every synthesis request killed it.
-  # No access-log line, no traceback, socket closed with 0 bytes read, and
-  # the container back at a fresh startup banner.
+  # It comes up healthy and stays healthy idle (~1.1GB resident, 68 voice
+  # packs, model warmed in 8.4s) and serves /v1/audio/voices fine, but a
+  # first attempt died on every synthesis request: no access-log line, no
+  # traceback, socket closed with 0 bytes read, container back at a fresh
+  # startup banner. That signature is a hard kill (SIGKILL/segfault), not a
+  # Python-level error — which narrows it to host memory or the upstream
+  # crash bug in this endpoint, and does not by itself distinguish them.
   #
-  # The 4g limit was never the binding constraint — upstream measures ~1.15GB
-  # resident after serving a request. What this shared box could not absorb
-  # was the transient spike during inference, on top of every other project
-  # already resident on it. cpus/mem_limit stay as neighbour protection for
-  # whenever this runs again.
-  #
-  # Re-enable with `docker compose --profile kokoro up`, or by deleting the
-  # profiles key, once this project has a host with real memory headroom.
-  # Nothing on the app side needs to change: TTS_PROVIDER selects the
-  # backend, and services/kokoro.ts is already verified against the real
-  # /v1/audio/voices response.
+  # The thread caps below are the cheap half of that fix. PyTorch CPU
+  # inference allocates per-thread memory arenas and defaults to one thread
+  # per core, so on a shared box it both spikes RSS and fights every other
+  # project for CPU. Pinning to 2 bounds the transient allocation that the
+  # kill happens during. mem_limit is deliberately NOT the constraint being
+  # tuned here — upstream measures ~1.15GB resident after serving a request,
+  # well under this cap.
   kokoro:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
-    profiles:
-      - kokoro
+    environment:
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      WEB_CONCURRENCY: "1"
     restart: unless-stopped
     cpus: 2.0
     mem_limit: 4g
