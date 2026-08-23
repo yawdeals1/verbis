@@ -241,15 +241,13 @@ export async function waitUntilReady(timeoutMs: number): Promise<boolean> {
  */
 function punctuateForSynthesis(text: string): string {
   return text
-    .split('
-')
+    .split(/\r?\n/)
     .map((line) => {
       const trimmed = line.trimEnd()
       if (!trimmed) return line
       return /[.!?;:,]$/.test(trimmed) ? line : `${trimmed}.`
     })
-    .join('
-')
+    .join('\n')
 }
 
 export async function synthesizeChunk(text: string, voiceId: string): Promise<SynthesizeResult> {
