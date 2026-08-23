@@ -36,8 +36,37 @@ export const env = {
   get deploroApiToken() {
     return required('DEPLORO_API_TOKEN')
   },
+  // Which TTS backend generates chunk audio. `kokoro` is a self-hosted
+  // Kokoro-82M container (see the `kokoro` service in deploro.compose.yml) —
+  // no API key and no per-character billing, at the cost of running at
+  // roughly playback speed on CPU. Set to `elevenlabs` to switch back; both
+  // produce the same character-anchored timing, so previously generated
+  // audio stays valid either way.
+  get ttsProvider(): 'kokoro' | 'elevenlabs' {
+    const value = optional('TTS_PROVIDER') ?? 'kokoro'
+    if (value !== 'kokoro' && value !== 'elevenlabs') {
+      throw new Error(`Invalid TTS_PROVIDER: ${value}. Expected 'kokoro' or 'elevenlabs'.`)
+    }
+    return value
+  },
+  get kokoroBaseUrl() {
+    return optional('KOKORO_BASE_URL') ?? 'http://kokoro:8880'
+  },
+  // A full chunk can take about as long to synthesize as it takes to play
+  // back, so this is sized against MAX_CHUNK_CHARS (~1000 chars, ~70s of
+  // audio) with generous headroom for a loaded shared VPS.
+  get kokoroTimeoutMs() {
+    return Number(optional('KOKORO_TIMEOUT_MS') ?? 600_000)
+  },
+
   get elevenLabsApiKey() {
     return required('ELEVENLABS_API_KEY')
+  },
+  // Left at multilingual_v2 so switching TTS_PROVIDER back reproduces the
+  // previous output exactly. `eleven_flash_v2_5` is half the price per
+  // character and supports the same with-timestamps endpoint.
+  get elevenLabsModelId() {
+    return optional('ELEVENLABS_MODEL_ID') ?? 'eleven_multilingual_v2'
   },
   // `GOOGLE_APPLICATION_CREDENTIALS` (a file path) works for local dev where
   // the key file sits on disk. Deploro's `vps set-env` can only set string

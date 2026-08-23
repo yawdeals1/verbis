@@ -1,4 +1,4 @@
-import { synthesizeChunk } from './elevenlabs.js'
+import { synthesizeChunk } from './tts.js'
 import { putObject } from '../storage/index.js'
 import { markChunkError, markChunkReady } from '../db/chunks.js'
 import { updateDocumentStatus } from '../db/documents.js'

@@ -1,5 +1,6 @@
 import { env } from '../config/env.js'
-import type { TimingData, WordTiming } from '../types/timing.js'
+import type { WordTiming } from '../types/timing.js'
+import type { SynthesizeResult, VoiceOption } from './ttsTypes.js'
 
 const API_BASE = 'https://api.elevenlabs.io/v1'
 
@@ -56,12 +57,6 @@ function deriveWordTimings(alignment: AlignmentResponse['alignment']): WordTimin
   return words
 }
 
-export interface SynthesizeResult {
-  audioBuffer: Buffer
-  timing: TimingData
-  durationSeconds: number
-}
-
 export async function synthesizeChunk(text: string, voiceId: string): Promise<SynthesizeResult> {
   const response = await fetch(`${API_BASE}/text-to-speech/${voiceId}/with-timestamps`, {
     method: 'POST',
@@ -72,7 +67,7 @@ export async function synthesizeChunk(text: string, voiceId: string): Promise<Sy
     },
     body: JSON.stringify({
       text,
-      model_id: 'eleven_multilingual_v2',
+      model_id: env.elevenLabsModelId,
     }),
   })
 
@@ -90,11 +85,6 @@ export async function synthesizeChunk(text: string, voiceId: string): Promise<Sy
   return { audioBuffer, timing: { words }, durationSeconds }
 }
 
-export interface VoiceOption {
-  providerVoiceId: string
-  displayName: string
-}
-
 const FALLBACK_VOICES: VoiceOption[] = [
   { providerVoiceId: '21m00Tcm4TlvDq8ikWAM', displayName: 'Rachel' },
   { providerVoiceId: 'pNInz6obpgDQGcFmaJgB', displayName: 'Adam' },
@@ -107,13 +97,20 @@ export async function listVoices(): Promise<VoiceOption[]> {
     const response = await fetch(`${API_BASE}/voices`, {
       headers: { 'xi-api-key': env.elevenLabsApiKey },
     })
-    if (!response.ok) return FALLBACK_VOICES
+    // Logged rather than swallowed: a 401 here used to be indistinguishable
+    // from a healthy response, silently writing the canned voice IDs below
+    // into the `voices` table as if they had been synced.
+    if (!response.ok) {
+      console.error(`ElevenLabs voice listing failed (${response.status}), using fallback voice IDs`)
+      return FALLBACK_VOICES
+    }
 
     const data = (await response.json()) as { voices: { voice_id: string; name: string }[] }
     if (!data.voices?.length) return FALLBACK_VOICES
 
     return data.voices.slice(0, 5).map((v) => ({ providerVoiceId: v.voice_id, displayName: v.name }))
-  } catch {
+  } catch (err) {
+    console.error('ElevenLabs voice listing threw, using fallback voice IDs:', err)
     return FALLBACK_VOICES
   }
 }

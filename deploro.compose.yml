@@ -29,7 +29,10 @@ services:
       NODE_ENV: ${NODE_ENV}
       DEPLORO_API_URL: ${DEPLORO_API_URL}
       DEPLORO_API_TOKEN: ${DEPLORO_API_TOKEN}
+      TTS_PROVIDER: ${TTS_PROVIDER}
+      KOKORO_BASE_URL: ${KOKORO_BASE_URL}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      ELEVENLABS_MODEL_ID: ${ELEVENLABS_MODEL_ID}
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
       GOOGLE_APPLICATION_CREDENTIALS_JSON: ${GOOGLE_APPLICATION_CREDENTIALS_JSON}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
@@ -47,6 +50,29 @@ services:
       # audio file, since the container filesystem is otherwise ephemeral.
       - verbis-storage:/app/storage
     restart: unless-stopped
+    depends_on:
+      - kokoro
+
+  # Self-hosted Kokoro-82M TTS (Apache 2.0), replacing metered ElevenLabs
+  # calls. No published port — like `backend`, it is reachable only over the
+  # compose-internal network, at http://kokoro:8880.
+  #
+  # CPU-only: the image tag is deliberately the `-cpu` build, since Deploro's
+  # VPS has no GPU. That means synthesis runs at roughly playback speed, so
+  # generating a long document takes about as long as listening to it —
+  # background generation (services/generation.ts) absorbs that, but the
+  # first chunk is the latency the reader actually feels.
+  #
+  # cpus/mem_limit are not tuning knobs, they are neighbour protection: this
+  # is Deploro's shared box, and an unbounded TTS container pegging every
+  # core for hours per import would starve every other project on the host.
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    restart: unless-stopped
+    cpus: 2.0
+    mem_limit: 4g
+    expose:
+      - "8880"
 
   frontend:
     build:

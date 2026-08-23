@@ -3,7 +3,7 @@ import { putObject } from '../storage/index.js'
 import { createDocument, updateDocumentStatus, updatePageLayout } from '../db/documents.js'
 import { createChunks } from '../db/chunks.js'
 import { getVoice, listVoiceRows, upsertVoice } from '../db/voices.js'
-import { listVoices as listElevenLabsVoices } from './elevenlabs.js'
+import { activeProvider, listVoices as listProviderVoices } from './tts.js'
 import { splitIntoChunks } from './chunking.js'
 import { processDocument } from './generation.js'
 import { extractPdfLayout } from './pdfLayout.js'
@@ -17,23 +17,35 @@ export class NoTextExtractedError extends Error {
   }
 }
 
-/** Resolves a voice by DB id, or falls back to the first known voice, syncing from ElevenLabs if the table is empty. */
+/**
+ * Resolves a voice by DB id, or falls back to the first known voice for the
+ * active TTS provider, syncing from that provider if none are stored yet.
+ *
+ * Every lookup is provider-scoped: `voices` accumulates rows from whichever
+ * backends have been used, and a provider voice ID is meaningless to a
+ * different provider (an ElevenLabs UUID passed to Kokoro is not a voice, it
+ * is a 400). So a requested voice belonging to another provider is
+ * deliberately ignored rather than honored.
+ */
 export async function resolveVoice(voiceId: string | undefined): Promise<VoiceRow> {
+  const provider = activeProvider()
+
   if (voiceId) {
     const voice = await getVoice(voiceId)
-    if (voice) return voice
+    if (voice && voice.provider === provider) return voice
   }
 
   const existing = await listVoiceRows()
-  if (existing.length > 0) return existing[0]
+  const forProvider = existing.filter((voice) => voice.provider === provider)
+  if (forProvider.length > 0) return forProvider[0]
 
-  const remoteVoices = await listElevenLabsVoices()
+  const remoteVoices = await listProviderVoices()
   const synced = await Promise.all(
     remoteVoices.map((v) =>
-      upsertVoice({ provider: 'elevenlabs', providerVoiceId: v.providerVoiceId, displayName: v.displayName }),
+      upsertVoice({ provider, providerVoiceId: v.providerVoiceId, displayName: v.displayName }),
     ),
   )
-  if (synced.length === 0) throw new Error('No ElevenLabs voices available to assign to this document.')
+  if (synced.length === 0) throw new Error(`No ${provider} voices available to assign to this document.`)
   return synced[0]
 }
 
