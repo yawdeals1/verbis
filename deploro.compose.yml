@@ -85,6 +85,18 @@ services:
       # on a freshly restarted container and dies once requests have
       # accumulated, regardless of how short the text is.
       MALLOC_ARENA_MAX: "2"
+      # Kokoro re-splits whatever text it is given into its own sub-chunks and
+      # runs one forward pass per sub-chunk, so OUR chunk size does not bound
+      # the largest allocation — these do. At the upstream defaults
+      # (175/250/450) a 724-char chunk produced a 282-token pass that was
+      # SIGKILLed on 3 of 3 freshly warmed containers, while 53- and 58-token
+      # passes returned 200 OK on the same endpoint. Capping well under that
+      # keeps every pass inside the size range observed to survive. Not set
+      # lower still because smart_split prefers sentence boundaries and only
+      # breaks mid-sentence when the cap forces it, which is audible.
+      TARGET_MIN_TOKENS: "60"
+      TARGET_MAX_TOKENS: "100"
+      ABSOLUTE_MAX_TOKENS: "150"
     restart: unless-stopped
     cpus: 2.0
     mem_limit: 4g

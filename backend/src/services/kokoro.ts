@@ -187,6 +187,41 @@ function mp3DurationSeconds(buffer: Buffer): number {
   return duration
 }
 
+const READY_POLL_INTERVAL_MS = 3_000
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Polls the voice listing until Kokoro serves it again.
+ *
+ * Uvicorn only finishes startup after the model is loaded and warmed (the
+ * container logs "Warmup completed" before "Application startup complete"),
+ * so a 200 here means the next synthesis request will reach a warmed
+ * process — which a fixed sleep cannot promise. Measured recovery after a
+ * kill is 45-60s, far longer than the 20s the retry used to wait, so every
+ * retry landed on a container that was still loading and failed for that
+ * reason rather than the original one.
+ */
+export async function waitUntilReady(timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${env.kokoroBaseUrl}/v1/audio/voices`, {
+        signal: AbortSignal.timeout(5_000),
+      })
+      if (response.ok) {
+        await response.arrayBuffer()
+        return true
+      }
+    } catch {
+      // Connection refused while the container restarts, or the socket
+      // closing mid-response. Both mean "not yet" — keep polling.
+    }
+    await sleep(READY_POLL_INTERVAL_MS)
+  }
+  return false
+}
+
 export async function synthesizeChunk(text: string, voiceId: string): Promise<SynthesizeResult> {
   const response = await fetch(`${env.kokoroBaseUrl}/dev/captioned_speech`, {
     method: 'POST',

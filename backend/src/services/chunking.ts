@@ -1,4 +1,9 @@
-const MAX_CHUNK_CHARS = 1000
+// Sized for time-to-first-audio, not for the TTS request size (Kokoro
+// sub-splits internally — see TARGET_MAX_TOKENS in deploro.compose.yml).
+// Self-hosted CPU synthesis runs at well under realtime on a shared box, so
+// a 1000-char chunk meant a couple of minutes before playback could start,
+// and lost that much work whenever a chunk had to be retried.
+const MAX_CHUNK_CHARS = 400
 
 const SENTENCE_SPLIT = /(?<=[.!?])\s+(?=[A-Z0-9"'“(])/
 

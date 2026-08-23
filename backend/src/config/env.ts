@@ -52,9 +52,10 @@ export const env = {
   get kokoroBaseUrl() {
     return optional('KOKORO_BASE_URL') ?? 'http://kokoro:8880'
   },
-  // A full chunk can take about as long to synthesize as it takes to play
-  // back, so this is sized against MAX_CHUNK_CHARS (~1000 chars, ~70s of
-  // audio) with generous headroom for a loaded shared VPS.
+  // Self-hosted CPU synthesis runs at a fraction of realtime, so a chunk
+  // takes several times longer to generate than to play. Sized against
+  // MAX_CHUNK_CHARS (~400 chars, ~28s of audio) with generous headroom for a
+  // loaded shared VPS.
   get kokoroTimeoutMs() {
     return Number(optional('KOKORO_TIMEOUT_MS') ?? 600_000)
   },

@@ -1,9 +1,11 @@
 import { env } from '../config/env.js'
 import * as elevenlabs from './elevenlabs.js'
 import * as kokoro from './kokoro.js'
-import type { SynthesizeResult, VoiceOption } from './ttsTypes.js'
+import type { SynthesizeResult, TtsBackend, VoiceOption } from './ttsTypes.js'
 
 export type { SynthesizeResult, VoiceOption }
+
+export type TtsProvider = 'kokoro' | 'elevenlabs'
 
 /**
  * Single seam between the pipeline and whichever TTS backend is active.
@@ -15,12 +17,10 @@ export type { SynthesizeResult, VoiceOption }
  * generated under one provider stays valid after a switch — only newly
  * generated chunks use the new backend.
  */
-const providers = {
+const providers: Record<TtsProvider, TtsBackend> = {
   kokoro,
   elevenlabs,
 }
-
-export type TtsProvider = keyof typeof providers
 
 export function activeProvider(): TtsProvider {
   return env.ttsProvider
@@ -47,4 +47,15 @@ export async function synthesizeChunk(text: string, voiceId: string): Promise<Sy
 
 export async function listVoices(): Promise<VoiceOption[]> {
   return providers[activeProvider()].listVoices()
+}
+
+/**
+ * Waits for the active backend to be able to serve again, returning false if
+ * it has no way to tell (a hosted API) or if it did not come back in time.
+ * Only meaningful between a failed synthesis and its retry.
+ */
+export async function waitForProviderReady(timeoutMs: number): Promise<boolean> {
+  const provider = providers[activeProvider()]
+  if (!provider.waitUntilReady) return false
+  return provider.waitUntilReady(timeoutMs)
 }

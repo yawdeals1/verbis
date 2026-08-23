@@ -1,4 +1,4 @@
-import { synthesizeChunk } from './tts.js'
+import { synthesizeChunk, waitForProviderReady } from './tts.js'
 import { putObject } from '../storage/index.js'
 import { markChunkError, markChunkReady } from '../db/chunks.js'
 import { updateDocumentStatus } from '../db/documents.js'
@@ -8,8 +8,9 @@ function audioKeyFor(documentId: string, sequenceIndex: number): string {
   return `audio/${documentId}/${sequenceIndex}.mp3`
 }
 
-const MAX_SYNTHESIS_ATTEMPTS = 3
-const RETRY_DELAY_MS = 20_000
+const MAX_SYNTHESIS_ATTEMPTS = 4
+const READY_WAIT_MS = 180_000
+const FALLBACK_RETRY_DELAY_MS = 20_000
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -18,10 +19,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  *
  * A self-hosted TTS container is a process that can be killed and restarted,
  * unlike a metered API that answers or returns an error — when it goes down
- * the socket simply closes with no response, and the next request after it
- * comes back up succeeds. The delay covers the container restarting plus
- * reloading and warming the model (~8-10s observed), so a retry lands on a
- * ready process rather than a refused connection.
+ * the socket simply closes with no response, and the same text succeeds once
+ * it is back. Recovery is dominated by reloading and warming the model, which
+ * measured at 45-60s, so this waits on an actual readiness probe rather than
+ * a fixed delay: the previous fixed 20s expired while the container was still
+ * loading, so every retry failed on a refused connection instead of getting a
+ * real second attempt.
  */
 async function synthesizeWithRetry(text: string, voiceProviderVoiceId: string) {
   for (let attempt = 1; ; attempt++) {
@@ -30,10 +33,11 @@ async function synthesizeWithRetry(text: string, voiceProviderVoiceId: string) {
     } catch (err) {
       if (attempt >= MAX_SYNTHESIS_ATTEMPTS) throw err
       console.warn(
-        `[tts] synthesis attempt ${attempt}/${MAX_SYNTHESIS_ATTEMPTS} failed, retrying in ${RETRY_DELAY_MS}ms:`,
+        `[tts] synthesis attempt ${attempt}/${MAX_SYNTHESIS_ATTEMPTS} failed, waiting for the backend to come back:`,
         err instanceof Error ? err.message : err,
       )
-      await sleep(RETRY_DELAY_MS)
+      const ready = await waitForProviderReady(READY_WAIT_MS)
+      if (!ready) await sleep(FALLBACK_RETRY_DELAY_MS)
     }
   }
 }
