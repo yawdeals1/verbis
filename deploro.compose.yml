@@ -50,24 +50,33 @@ services:
       # audio file, since the container filesystem is otherwise ephemeral.
       - verbis-storage:/app/storage
     restart: unless-stopped
-    depends_on:
-      - kokoro
 
-  # Self-hosted Kokoro-82M TTS (Apache 2.0), replacing metered ElevenLabs
-  # calls. No published port — like `backend`, it is reachable only over the
-  # compose-internal network, at http://kokoro:8880.
+  # Self-hosted Kokoro-82M TTS (Apache 2.0), reachable only over the
+  # compose-internal network at http://kokoro:8880 — no published port, same
+  # as `backend`.
   #
-  # CPU-only: the image tag is deliberately the `-cpu` build, since Deploro's
-  # VPS has no GPU. That means synthesis runs at roughly playback speed, so
-  # generating a long document takes about as long as listening to it —
-  # background generation (services/generation.ts) absorbs that, but the
-  # first chunk is the latency the reader actually feels.
+  # PARKED behind a compose profile: defined here, but deliberately NOT
+  # started by a normal `deploro vps deploy`. It came up healthy and stayed
+  # healthy idle (~1.1GB resident, 68 voice packs, model warmed in 8.4s), and
+  # /v1/audio/voices served fine — but every synthesis request killed it.
+  # No access-log line, no traceback, socket closed with 0 bytes read, and
+  # the container back at a fresh startup banner.
   #
-  # cpus/mem_limit are not tuning knobs, they are neighbour protection: this
-  # is Deploro's shared box, and an unbounded TTS container pegging every
-  # core for hours per import would starve every other project on the host.
+  # The 4g limit was never the binding constraint — upstream measures ~1.15GB
+  # resident after serving a request. What this shared box could not absorb
+  # was the transient spike during inference, on top of every other project
+  # already resident on it. cpus/mem_limit stay as neighbour protection for
+  # whenever this runs again.
+  #
+  # Re-enable with `docker compose --profile kokoro up`, or by deleting the
+  # profiles key, once this project has a host with real memory headroom.
+  # Nothing on the app side needs to change: TTS_PROVIDER selects the
+  # backend, and services/kokoro.ts is already verified against the real
+  # /v1/audio/voices response.
   kokoro:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    profiles:
+      - kokoro
     restart: unless-stopped
     cpus: 2.0
     mem_limit: 4g
