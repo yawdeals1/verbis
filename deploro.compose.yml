@@ -87,16 +87,20 @@ services:
       MALLOC_ARENA_MAX: "2"
       # Kokoro re-splits whatever text it is given into its own sub-chunks and
       # runs one forward pass per sub-chunk, so OUR chunk size does not bound
-      # the largest allocation — these do. At the upstream defaults
-      # (175/250/450) a 724-char chunk produced a 282-token pass that was
-      # SIGKILLed on 3 of 3 freshly warmed containers, while 53- and 58-token
-      # passes returned 200 OK on the same endpoint. Capping well under that
-      # keeps every pass inside the size range observed to survive. Not set
-      # lower still because smart_split prefers sentence boundaries and only
-      # breaks mid-sentence when the cap forces it, which is audible.
-      TARGET_MIN_TOKENS: "60"
-      TARGET_MAX_TOKENS: "100"
-      ABSOLUTE_MAX_TOKENS: "150"
+      # the largest allocation — these do. Measured against this VPS: 109-token
+      # passes return 200 OK, 145-token passes were SIGKILLed on 4 of 4 freshly
+      # warmed containers, and the upstream defaults (175/250/450) produced a
+      # 282-token pass that died just as reliably.
+      #
+      # ABSOLUTE_MAX_TOKENS is the one that actually matters. smart_split only
+      # breaks at sentence boundaries until this cap forces it, so text with no
+      # sentence punctuation — a table of contents, a heading list — runs
+      # straight to the absolute ceiling no matter what TARGET_MAX_TOKENS says.
+      # That is exactly the front matter most documents open with, which is why
+      # it kept being chunk 1 that failed.
+      TARGET_MIN_TOKENS: "40"
+      TARGET_MAX_TOKENS: "80"
+      ABSOLUTE_MAX_TOKENS: "100"
     restart: unless-stopped
     cpus: 2.0
     mem_limit: 4g

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { chunkAudioUrl, getDocument, mergeDocumentAudio, mergedAudioUrl, updatePosition } from '../api/client'
-import type { ChunkSummary, DocumentDetail } from '../api/types'
+import type { ChunkStatus, ChunkSummary, DocumentDetail } from '../api/types'
 
 const POLL_INTERVAL_MS = 2000
 const POSITION_SAVE_INTERVAL_MS = 5000
@@ -39,6 +39,21 @@ export function useReaderPlayback(documentId: string | undefined) {
   const hasAppliedResumeRef = useRef(false)
   const pendingSeekSecondsRef = useRef<number | null>(null)
 
+  /**
+   * Next chunk in `direction` that has audio, skipping ones whose synthesis
+   * failed. Without this a single failed chunk is a dead stop: nothing sets an
+   * audio src for it, so no `ended` fires and playback never resumes.
+   */
+  const playableIndexFrom = useCallback(
+    (chunks: { status: ChunkStatus }[], from: number, direction: 1 | -1) => {
+      for (let i = from; i >= 0 && i < chunks.length; i += direction) {
+        if (chunks[i].status !== 'error') return i
+      }
+      return null
+    },
+    [],
+  )
+
   const refresh = useCallback(async () => {
     if (!documentId) return
     const data = await getDocument(documentId)
@@ -59,7 +74,12 @@ export function useReaderPlayback(documentId: string | undefined) {
           hasAppliedResumeRef.current = true
           setChunkIndex(data.document.lastPosition.chunkSequenceIndex)
           pendingSeekSecondsRef.current = data.document.lastPosition.timeSeconds
+          return
         }
+        // Front matter is the most likely chunk to have failed synthesis, so
+        // opening a document at chunk 0 can land on one that will never play.
+        const opening = playableIndexFrom(data.chunks, 0, 1)
+        if (opening !== null) setChunkIndex(opening)
       })
       .catch((err) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Failed to load document')
@@ -178,12 +198,13 @@ export function useReaderPlayback(documentId: string | undefined) {
       setIsPlaying(false)
       return
     }
-    if (chunkIndex < detail.chunks.length - 1) {
-      goToNextChunk()
-    } else {
+    const next = playableIndexFrom(detail.chunks, chunkIndex + 1, 1)
+    if (next === null) {
       setIsPlaying(false)
+      return
     }
-  }, [detail, mergedMode, chunkIndex, goToNextChunk])
+    goToChunk(next)
+  }, [detail, mergedMode, chunkIndex, goToChunk, playableIndexFrom])
 
   const play = useCallback(() => {
     audioRef.current?.play().catch(() => {})

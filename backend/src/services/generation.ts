@@ -8,7 +8,8 @@ function audioKeyFor(documentId: string, sequenceIndex: number): string {
   return `audio/${documentId}/${sequenceIndex}.mp3`
 }
 
-const MAX_SYNTHESIS_ATTEMPTS = 4
+const MAX_SYNTHESIS_ATTEMPTS = 3
+const MAX_LEAD_CHUNK_ATTEMPTS = 3
 const READY_WAIT_MS = 180_000
 const FALLBACK_RETRY_DELAY_MS = 20_000
 
@@ -76,8 +77,15 @@ export function generateRemainingChunksInBackground(
 }
 
 /**
- * Generates the first chunk synchronously so the caller can respond once
- * playback is possible, then kicks off the rest in the background.
+ * Generates a chunk the caller can start playing, then kicks off the rest in
+ * the background.
+ *
+ * Falls forward instead of failing the document when a lead chunk can't be
+ * synthesized. Front matter — a table of contents, a bare heading list — is
+ * both the least worth hearing and the most likely to break synthesis (no
+ * sentence punctuation to split on, so it produces the largest forward pass),
+ * and a 52-chunk document is not unreadable because its contents page is.
+ * Chunks that fail are left marked `error` so the reader skips them.
  */
 export async function processDocument(documentId: string, voiceProviderVoiceId: string, chunks: ChunkRow[]): Promise<void> {
   if (chunks.length === 0) {
@@ -85,16 +93,21 @@ export async function processDocument(documentId: string, voiceProviderVoiceId: 
     return
   }
 
-  const [first, ...rest] = chunks
-  try {
-    await generateChunk(first, voiceProviderVoiceId)
-  } catch (err) {
-    console.error(`First-chunk generation failed (document ${documentId}):`, err)
-    await markChunkError(first.id)
-    await updateDocumentStatus(documentId, 'error', 'Audio generation failed for the first chunk.')
+  const leadLimit = Math.min(MAX_LEAD_CHUNK_ATTEMPTS, chunks.length)
+  for (let index = 0; index < leadLimit; index++) {
+    const chunk = chunks[index]
+    try {
+      await generateChunk(chunk, voiceProviderVoiceId)
+    } catch (err) {
+      console.error(`Lead chunk generation failed (document ${documentId}, chunk ${chunk.sequenceIndex}):`, err)
+      await markChunkError(chunk.id)
+      continue
+    }
+
+    await updateDocumentStatus(documentId, 'ready')
+    generateRemainingChunksInBackground(documentId, voiceProviderVoiceId, chunks.slice(index + 1))
     return
   }
 
-  await updateDocumentStatus(documentId, 'ready')
-  generateRemainingChunksInBackground(documentId, voiceProviderVoiceId, rest)
+  await updateDocumentStatus(documentId, 'error', 'Audio generation failed for the opening chunks.')
 }
