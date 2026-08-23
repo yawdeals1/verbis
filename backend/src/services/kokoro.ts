@@ -222,13 +222,43 @@ export async function waitUntilReady(timeoutMs: number): Promise<boolean> {
   return false
 }
 
+/**
+ * Gives Kokoro's splitter something to break on, without touching the text
+ * the timings are anchored to.
+ *
+ * smart_split only breaks at sentence boundaries until ABSOLUTE_MAX_TOKENS
+ * forces it, and its fallback path yields an over-long clause unconditionally
+ * — so text with no terminal punctuation (a table of contents, a heading
+ * list, a bare bullet) is emitted as one huge forward pass no matter how the
+ * token caps are set. That pass is what the host OOM killer lands on.
+ * Terminating each line turns one such pass into several small ones.
+ *
+ * Only the synthesis request sees this. `alignTimingsToSource` still resolves
+ * against the original text, and comparable() strips punctuation before
+ * matching, so an added period attaches to a word that already exists rather
+ * than becoming a token of its own — the character offsets tap-to-jump
+ * depends on stay exactly as stored.
+ */
+function punctuateForSynthesis(text: string): string {
+  return text
+    .split('
+')
+    .map((line) => {
+      const trimmed = line.trimEnd()
+      if (!trimmed) return line
+      return /[.!?;:,]$/.test(trimmed) ? line : `${trimmed}.`
+    })
+    .join('
+')
+}
+
 export async function synthesizeChunk(text: string, voiceId: string): Promise<SynthesizeResult> {
   const response = await fetch(`${env.kokoroBaseUrl}/dev/captioned_speech`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'kokoro',
-      input: text,
+      input: punctuateForSynthesis(text),
       voice: voiceId,
       speed: 1.0,
       response_format: 'mp3',
