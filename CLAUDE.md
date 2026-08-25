@@ -11,7 +11,7 @@ A personal read-aloud app: import a PDF/DOCX or a photo of a book page, get it r
 - **Frontend**: React + Vite, built as an installable PWA. Served by nginx, deployed via Deploro VPS compute (`deploro.compose.yml`).
 - **Backend**: Node/Express, self-hosted on Deploro VPS compute (needed for `@google-cloud/vision`, `jsdom`, and local-disk storage, none of which run on Deploro's Cloudflare Worker path).
 - **Database**: Deploro's per-project Studio REST API (`backend/src/db/studioClient.ts`), not a direct Postgres connection — same for local dev and production, both point at the same Deploro-hosted `verbis` project via `DEPLORO_API_URL`/`DEPLORO_API_TOKEN`.
-- **File/audio storage**: S3-compatible storage on Deploro (e.g. Hetzner) in production; falls back to local disk (`backend/storage/`) when `S3_*` env vars are unset (`backend/src/storage/index.ts`).
+- **File/audio storage**: Deploro project storage (R2) via its HTTP storage API, selected by `DEPLORO_STORAGE_URL` (`backend/src/storage/deploroStorage.ts`). Falls through to an S3-compatible bucket when the `S3_*` vars are set, then to local disk (`backend/storage/`) when neither is (`backend/src/storage/index.ts`).
 - **TTS**: ElevenLabs, `/v1/text-to-speech/{voice_id}/with-timestamps`.
 - **OCR**: Google Cloud Vision, Document Text Detection mode.
 - **Summarization/Q&A (Phase 4)**: local Ollama model (default `gemma4`, configurable via `OLLAMA_MODEL`) — no API key, no per-token billing.

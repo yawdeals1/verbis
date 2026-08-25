@@ -103,6 +103,20 @@ export const env = {
     return optional('OLLAMA_API_KEY')
   },
 
+  // Deploro project storage (R2), the production backend for originals and
+  // generated audio. Its routes are siblings of the Studio DB API rather
+  // than children of it, so this is DEPLORO_API_URL without the trailing
+  // `/studio` — kept as its own var so unsetting it falls through to S3 and
+  // then local disk. Deploro exposes no S3-compatible endpoint and issues no
+  // S3 keys for this bucket, which is why it can't just be an S3_ENDPOINT.
+  // Writes require a project-admin token; a member-scoped one 403s.
+  get deploroStorageConfigured(): boolean {
+    return Boolean(optional('DEPLORO_STORAGE_URL'))
+  },
+  get deploroStorageUrl() {
+    return required('DEPLORO_STORAGE_URL').replace(/\/+$/, '')
+  },
+
   // S3-compatible storage is optional in dev: when unset, storage falls back
   // to local disk (see src/storage/index.ts) so the app runs before Deploro
   // object storage is provisioned.
