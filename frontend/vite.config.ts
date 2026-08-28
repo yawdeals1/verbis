@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       workbox: {
         // Offline listening (PRODUCT_PLAN.md §5 Phase 3): once a chunk's
         // audio is generated it never changes, so cache it aggressively.
@@ -51,8 +51,8 @@ export default defineConfig({
         name: 'Verbis',
         short_name: 'Verbis',
         description: 'Read-aloud app for PDFs, Word docs, and scanned books with synced highlighting.',
-        theme_color: '#111111',
-        background_color: '#111111',
+        theme_color: '#fffdfa',
+        background_color: '#fcf9f5',
         display: 'standalone',
         start_url: '/',
         icons: [
@@ -60,6 +60,7 @@ export default defineConfig({
             src: 'icons.svg',
             sizes: 'any',
             type: 'image/svg+xml',
+            purpose: 'any maskable',
           },
         ],
       },

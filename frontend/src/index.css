@@ -223,9 +223,28 @@ textarea {
 
 .app-brand {
   display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.55rem;
   text-decoration: none;
+}
+
+.app-brand-icon {
+  width: 1.55rem;
+  height: 1.55rem;
+  flex: none;
+  fill: currentColor;
+  color: var(--text-h);
+}
+
+.app-brand-icon-accent {
+  fill: var(--accent);
+}
+
+.app-brand-icon-listen {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-width: 2.2;
 }
 
 .app-brand-mark {

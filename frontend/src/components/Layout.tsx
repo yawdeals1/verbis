@@ -29,6 +29,11 @@ export default function Layout() {
     <div>
       <header className="app-header">
         <Link to="/" className="app-brand">
+          <svg className="app-brand-icon" viewBox="0 0 32 32" aria-hidden="true">
+            <path className="app-brand-icon-accent" d="M3.5 6.3c4.4-.2 8.5 1.4 11.7 4.4v16.5c-3.4-3.3-7.4-5.2-11.7-5.5z" />
+            <path d="M16.8 10.7c3.2-3 7.3-4.6 11.7-4.4v12.5c0 1.6-1 2.7-2.4 2.9-3.8.7-6.9 2.5-9.3 5.5z" />
+            <path className="app-brand-icon-listen" d="M25 2.9c2.4.6 4.2 2.3 4.8 4.6" />
+          </svg>
           <span className="app-brand-mark">Verbis</span>
         </Link>
         <div className="app-header-right">
