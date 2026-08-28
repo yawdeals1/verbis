@@ -36,28 +36,33 @@ export const env = {
   get deploroApiToken() {
     return required('DEPLORO_API_TOKEN')
   },
-  // Which TTS backend generates chunk audio. `kokoro` is a self-hosted
-  // Kokoro-82M container (see the `kokoro` service in deploro.compose.yml) —
-  // no API key and no per-character billing, at the cost of running at
-  // roughly playback speed on CPU. Set to `elevenlabs` to switch back; both
-  // produce the same character-anchored timing, so previously generated
-  // audio stays valid either way.
-  get ttsProvider(): 'kokoro' | 'elevenlabs' {
-    const value = optional('TTS_PROVIDER') ?? 'kokoro'
-    if (value !== 'kokoro' && value !== 'elevenlabs') {
-      throw new Error(`Invalid TTS_PROVIDER: ${value}. Expected 'kokoro' or 'elevenlabs'.`)
+  // Which TTS backend generates chunk audio. `speechify` is the default:
+  // its speech marks carry per-word character offsets and times in the same
+  // response as the audio, which is what synced highlighting needs. Set to
+  // `elevenlabs` to switch; both produce the same character-anchored timing,
+  // so previously generated audio stays valid either way.
+  get ttsProvider(): 'speechify' | 'elevenlabs' {
+    const value = optional('TTS_PROVIDER') ?? 'speechify'
+    if (value !== 'speechify' && value !== 'elevenlabs') {
+      throw new Error(`Invalid TTS_PROVIDER: ${value}. Expected 'speechify' or 'elevenlabs'.`)
     }
     return value
   },
-  get kokoroBaseUrl() {
-    return optional('KOKORO_BASE_URL') ?? 'http://kokoro:8880'
+  get speechifyApiKey() {
+    return required('SPEECHIFY_API_KEY')
   },
-  // Self-hosted CPU synthesis runs at a fraction of realtime, so a chunk
-  // takes several times longer to generate than to play. Sized against
-  // MAX_CHUNK_CHARS (~400 chars, ~28s of audio) with generous headroom for a
-  // loaded shared VPS.
-  get kokoroTimeoutMs() {
-    return Number(optional('KOKORO_TIMEOUT_MS') ?? 600_000)
+  // Configurable because Speechify has moved its API host once already
+  // (api.sws.speechify.com -> api.speechify.ai) and the older host still
+  // answers, so a redirect or a cutover is fixable without a code change.
+  get speechifyBaseUrl() {
+    return (optional('SPEECHIFY_BASE_URL') ?? 'https://api.speechify.ai/v1').replace(/\/+$/, '')
+  },
+  // simba-3.0 is Speechify's own default and the one model that accepts the
+  // whole voice catalog. simba-3.2 sounds better but is English-only and
+  // limited to eight curated voices, so switching model also narrows what
+  // `GET /voices` may offer (see listVoices in services/speechify.ts).
+  get speechifyModel() {
+    return optional('SPEECHIFY_MODEL') ?? 'simba-3.0'
   },
 
   get elevenLabsApiKey() {

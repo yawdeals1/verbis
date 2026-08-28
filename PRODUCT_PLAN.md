@@ -6,13 +6,15 @@
 
 Verbis is a personal read-aloud app: import a PDF, DOCX, or a photo of a physical book page, and have it read aloud in a natural voice with the current word highlighted in sync, so you can follow along or glance up and find your place instantly. Tapping any word jumps both the highlight and the audio to that point. Documents live in a personal library with reading position saved automatically.
 
-Finalized stack: **React + Vite installable PWA and a Node/Express API, both self-hosted on Deploro VPS compute**, backed by **Deploro's Studio REST API for the database + Deploro project storage (R2) for files**, using **ElevenLabs** for TTS with character-level timing and **Google Cloud Vision** for OCR.
+Finalized stack: **React + Vite installable PWA and a Node/Express API, both self-hosted on Deploro VPS compute**, backed by **Deploro's Studio REST API for the database + Deploro project storage (R2) for files**, using **Speechify** (default) or **ElevenLabs** for TTS with character-level timing, selected by `TTS_PROVIDER`, and **Google Cloud Vision** for OCR.
+
+**Provider switch (2026-08-28):** TTS moved off self-hosted Kokoro-82M (unreliable — frequent OOM kills under CPU inference on the shared VPS) to Speechify's hosted `POST /v1/audio/speech`, which returns nested speech marks (character offsets + start/end times) alongside the audio in one call, matching what ElevenLabs' `with-timestamps` endpoint already provided. ElevenLabs remains available via `TTS_PROVIDER=elevenlabs`.
 
 ## 2. Finalized Architecture
 
 | Area | Decision | Why |
 |---|---|---|
-| TTS | ElevenLabs, `/v1/text-to-speech/{voice_id}/with-timestamps` | Only realistic option here that returns character-level `char_start_times_ms`/`char_end_times_ms` alongside the audio in one call — no separate alignment step. Best-in-class voice quality. Free tier is small (~10K chars/month), so cost needs tracking once past prototyping. |
+| TTS | Speechify, `POST /v1/audio/speech` (default); ElevenLabs, `/v1/text-to-speech/{voice_id}/with-timestamps` (alternate, `TTS_PROVIDER=elevenlabs`) | Both return character-level timing (Speechify: nested `speech_marks` with `start`/`end` offsets and `start_time`/`end_time`; ElevenLabs: `char_start_times_ms`/`char_end_times_ms`) alongside the audio in one call — no separate alignment step. Speechify is metered per character like ElevenLabs, so cost needs the same tracking once past prototyping. |
 | OCR | Google Cloud Vision, Document Text Detection | Purpose-built for dense printed text on photographed pages; handles skew/lighting reasonably and preserves reading order, which matters more here than raw character accuracy. Cheap at personal-use volume. |
 | Platform | Installable PWA (single React + Vite codebase) | One codebase covers desktop and mobile. Browser camera input (`<input type="file" accept="image/*" capture>`) covers the scan-a-book-page use case without a native app build/store overhead. "Add to Home Screen" gives an app-like feel for a personal tool. |
 | Backend | Node/Express, self-hosted on Deploro | Avoids serverless execution-time limits — TTS generation, OCR calls, and chunk processing can run long, especially on first-chunk-through-full-document generation. Matches the pattern used by AmpedClock, Amped Cadence, and PX Dispatch. |
@@ -32,7 +34,7 @@ Finalized stack: **React + Vite installable PWA and a Node/Express API, both sel
   ├─ Text extraction: pdf.js / mammoth.js (PDF/DOCX), or forwards photo to OCR
   ├─ OCR: Google Cloud Vision → structured text
   ├─ Chunking: split extracted text into sentence/paragraph-sized chunks
-  ├─ TTS: ElevenLabs with-timestamps per chunk → audio (MP3) + char-level timing
+  ├─ TTS: Speechify (default) or ElevenLabs per chunk → audio (MP3) + char-level timing
   ├─ Persists: chunk text, audio file, timing JSON
   │
   ▼
@@ -58,7 +60,7 @@ Implemented in `backend/src/db/schema.sql` (source of truth — keep this sectio
 
 - **documents**: `id`, `title`, `source_type` (`pdf` | `docx` | `txt` | `epub` | `scan` | `url`), `original_file_key` (bucket key, not a generic URL), `voice_id` (FK → voices), `status` (`processing` | `ready` | `error`), `error_message`, `last_position` (JSON: `{chunkSequenceIndex, timeSeconds}`), `summary` (Phase 4, cached on first generation), `page_layout` (PDF-only JSON: `{pages: [{pageNumber, width, height}], words: [{charStart, charEnd, page, x, y, width, height}]}`, fractional bounding boxes per word for the Page view reader — `null` for non-PDF documents and PDFs imported before this existed), `created_at`
 - **chunks**: `id`, `document_id`, `sequence_index`, `text_content`, `char_start` (this chunk's starting offset within the document's full extracted text — used with `documents.page_layout` to map a chunk's TTS word timing onto a position on the rendered PDF page), `status` (`pending` | `ready` | `error`, tracks per-chunk background generation), `audio_key` (bucket key), `timing_data` (JSON: `{words: [{word, charStart, charEnd, startMs, endMs}]}`), `duration_seconds`
-- **voices**: `id`, `provider` (`elevenlabs`), `provider_voice_id`, `display_name`
+- **voices**: `id`, `provider` (`speechify` | `elevenlabs`), `provider_voice_id`, `display_name`
 - **reading_sessions**: defined in the schema for future history-beyond-last-position use; not yet written to by any route — `documents.last_position` covers resume for v1.
 
 Object storage note: `putObject`/`getObjectBuffer` (`backend/src/storage/index.ts`) pick one of three backends in priority order — Deploro project storage when `DEPLORO_STORAGE_URL` is set (production), an S3-compatible bucket when the `S3_*` vars are set, then local disk under `backend/storage/` so the app runs with no storage infra at all. The bucket is private: reads are proxied back through `GET /documents/:id/original` and `.../chunks/:seq/audio` rather than served as public URLs, which keeps uploaded PDFs from being world-readable to anyone holding a UUID. Public read is per-project on Deploro, not per-folder, so it can't be enabled for audio alone. There's no separate local-dev database anymore — both local dev and the deployed app talk to the same Deploro-hosted Studio API for the `verbis` project (`backend/src/db/studioClient.ts`), authenticated with a project-scoped PAT (`DEPLORO_API_TOKEN`).
@@ -88,7 +90,8 @@ All of Phase 1–4 above is built (`backend/src/`, `frontend/src/`) except multi
 
 ## 6. Environment/Secrets Checklist
 
-- [x] ElevenLabs API key → `backend/.env` `ELEVENLABS_API_KEY`; also set on VPS via `deploro vps set-env`
+- [ ] Speechify API key (default TTS backend) → `backend/.env` `SPEECHIFY_API_KEY`; also set on VPS via `deploro vps set-env`. `TTS_PROVIDER` defaults to `speechify`.
+- [x] ElevenLabs API key (alternate backend, `TTS_PROVIDER=elevenlabs`) → `backend/.env` `ELEVENLABS_API_KEY`; also set on VPS via `deploro vps set-env`
 - [x] Google Cloud Vision service account credentials → `GOOGLE_APPLICATION_CREDENTIALS_JSON` (base64), set both locally and via `deploro vps set-env`
 - [x] Ollama → production uses the direct cloud API (`OLLAMA_BASE_URL=https://ollama.com` + `OLLAMA_API_KEY`), not a local relay, since the VPS can't reach `localhost` on the dev machine
 - [x] Deploro `verbis` project database → `deploro db create` + `deploro migrate create/apply` against `backend/src/db/schema.sql`; app reaches it via `DEPLORO_API_URL`/`DEPLORO_API_TOKEN`, no direct Postgres connection

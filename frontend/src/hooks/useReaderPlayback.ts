@@ -19,6 +19,18 @@ function findWordIndex(chunk: ChunkSummary | undefined, timeMs: number): number 
   return null
 }
 
+/**
+ * How many leading chunks generation has resolved one way or another (ready
+ * or permanently failed). Generation runs strictly in sequence
+ * (services/generation.ts), so a chunk is never ready while an earlier one
+ * is still pending — the first pending chunk is the frontier, and it mirrors
+ * the same count the backend computes in documents.ts's POST /merge.
+ */
+function resolvedChunkCount(chunks: { status: ChunkStatus }[]): number {
+  const pendingIndex = chunks.findIndex((c) => c.status === 'pending')
+  return pendingIndex === -1 ? chunks.length : pendingIndex
+}
+
 export function useReaderPlayback(documentId: string | undefined) {
   const [detail, setDetail] = useState<DocumentDetail | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -34,6 +46,16 @@ export function useReaderPlayback(documentId: string | undefined) {
   const [mergedMode, setMergedMode] = useState(false)
   const [isMerging, setIsMerging] = useState(false)
   const [mergeError, setMergeError] = useState<string | null>(null)
+  // How many leading chunks the currently-loaded merged file covers, and
+  // whether that's the whole document or generation is still filling in more
+  // behind it — both come straight from the last POST /merge response.
+  const [mergedChunkCount, setMergedChunkCount] = useState(0)
+  const [mergedComplete, setMergedComplete] = useState(false)
+  // True once playback has run into the end of what's currently merged but
+  // the document isn't finished yet — the growth effect below watches this
+  // and re-merges/resumes the instant more chunks resolve, instead of the
+  // player just stopping there.
+  const [isBufferingMore, setIsBufferingMore] = useState(false)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const hasAppliedResumeRef = useRef(false)
@@ -92,7 +114,11 @@ export function useReaderPlayback(documentId: string | undefined) {
 
   const currentChunk = detail?.chunks[chunkIndex]
 
-  const canMerge = Boolean(detail && detail.chunks.length > 0 && detail.chunks.every((c) => c.status === 'ready'))
+  // At least one section has to be ready to merge anything — unlike before,
+  // this no longer waits for the whole document (see resolvedChunkCount).
+  const canMerge = Boolean(
+    detail && detail.chunks.slice(0, resolvedChunkCount(detail.chunks)).some((c) => c.status === 'ready'),
+  )
 
   // Cumulative start offset (ms) of each chunk within the merged file — chunk
   // i's audio begins right after the sum of every earlier chunk's duration,
@@ -121,18 +147,23 @@ export function useReaderPlayback(documentId: string | undefined) {
     [chunkOffsetsMs],
   )
 
-  // Poll while the current (or document) generation is still in progress.
+  // Poll while the current (or document) generation is still in progress —
+  // also while merged playback has run dry waiting for more sections, since
+  // that can happen well after `currentChunk` (the last already-merged one)
+  // stopped being pending.
   useEffect(() => {
     if (!documentId || !detail) return
     const stillGenerating =
-      detail.document.status === 'processing' || (currentChunk && currentChunk.status === 'pending')
+      detail.document.status === 'processing' ||
+      (currentChunk && currentChunk.status === 'pending') ||
+      isBufferingMore
     if (!stillGenerating) return
 
     const interval = setInterval(() => {
       refresh().catch(() => {})
     }, POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [documentId, detail, currentChunk, refresh])
+  }, [documentId, detail, currentChunk, refresh, isBufferingMore])
 
   // Swap audio src when the active chunk changes, or when it finishes
   // generating (same chunk id, status flips pending -> ready via polling).
@@ -195,6 +226,14 @@ export function useReaderPlayback(documentId: string | undefined) {
   const handleEnded = useCallback(() => {
     if (!detail) return
     if (mergedMode) {
+      // Reached the end of what's merged so far. If the document isn't
+      // fully generated yet, this isn't really the end — flag it and let
+      // the growth effect above resume playback once more sections resolve,
+      // instead of just stopping.
+      if (!mergedComplete) {
+        setIsBufferingMore(true)
+        return
+      }
       setIsPlaying(false)
       return
     }
@@ -204,7 +243,7 @@ export function useReaderPlayback(documentId: string | undefined) {
       return
     }
     goToChunk(next)
-  }, [detail, mergedMode, chunkIndex, goToChunk, playableIndexFrom])
+  }, [detail, mergedMode, mergedComplete, chunkIndex, goToChunk, playableIndexFrom])
 
   const play = useCallback(() => {
     audioRef.current?.play().catch(() => {})
@@ -304,22 +343,32 @@ export function useReaderPlayback(documentId: string | undefined) {
   )
 
   /**
-   * Concatenates every ready chunk into one audio file server-side (cached —
-   * a repeat call is a no-op) and switches playback onto it, preserving the
-   * current position and play/pause state across the swap.
+   * Concatenates every currently-resolved chunk into one audio file
+   * server-side and switches (or stays) on it, preserving position and
+   * play/pause state across the swap.
+   *
+   * Doubles as the "extend" call once already in merged mode: the growth
+   * effect below calls this again after more chunks resolve, and since the
+   * merged file lives at the same URL each time, `audio.load()` is required
+   * to force a refetch — reassigning an unchanged `.src` string is a no-op.
    */
   const mergeAudio = useCallback(async () => {
-    if (!documentId || !canMerge || isMerging) return
+    if (!documentId || isMerging) return
     setIsMerging(true)
     setMergeError(null)
     try {
-      await mergeDocumentAudio(documentId)
+      const result = await mergeDocumentAudio(documentId)
       const audio = audioRef.current
-      const globalSeconds = (chunkOffsetsMs[chunkIndex] ?? 0) / 1000 + (audio?.currentTime ?? 0)
+      const globalSeconds = mergedMode
+        ? (audio?.currentTime ?? 0)
+        : (chunkOffsetsMs[chunkIndex] ?? 0) / 1000 + (audio?.currentTime ?? 0)
       pendingSeekSecondsRef.current = globalSeconds
       setMergedMode(true)
+      setMergedChunkCount(result.chunkCount)
+      setMergedComplete(result.complete)
       if (audio) {
         audio.src = mergedAudioUrl(documentId)
+        audio.load()
         audio.playbackRate = playbackRate
         if (isPlaying) audio.play().catch(() => {})
       }
@@ -328,7 +377,22 @@ export function useReaderPlayback(documentId: string | undefined) {
     } finally {
       setIsMerging(false)
     }
-  }, [documentId, canMerge, isMerging, chunkOffsetsMs, chunkIndex, playbackRate, isPlaying])
+  }, [documentId, isMerging, mergedMode, chunkOffsetsMs, chunkIndex, playbackRate, isPlaying])
+
+  /**
+   * Once playback has run into the end of what's merged so far
+   * (isBufferingMore, set by handleEnded below) and more chunks have since
+   * resolved, pick the merge back up automatically — the listener never has
+   * to notice or re-click anything, generation just catches up underneath
+   * them.
+   */
+  useEffect(() => {
+    if (!isBufferingMore || !detail || isMerging) return
+    if (resolvedChunkCount(detail.chunks) > mergedChunkCount) {
+      setIsBufferingMore(false)
+      mergeAudio()
+    }
+  }, [isBufferingMore, detail, mergedChunkCount, isMerging, mergeAudio])
 
   /** Chunk-local (sequenceIndex, timeSeconds) for the resume-position API, regardless of which mode is currently playing — so resuming later always lands back in normal per-chunk mode at the right spot. */
   const getLocalPosition = useCallback(
@@ -382,6 +446,8 @@ export function useReaderPlayback(documentId: string | undefined) {
     isMerging,
     mergeError,
     canMerge,
+    mergedComplete,
+    isBufferingMore,
     handlers: { handleLoadedMetadata, handleTimeUpdate, handleEnded },
     actions: { play, pause, togglePlay, skip, setPlaybackRate, jumpToWord, goToNextChunk, goToPrevChunk, mergeAudio },
   }

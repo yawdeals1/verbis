@@ -161,9 +161,9 @@ documentsRouter.get('/:id/original', async (req, res) => {
  * and silently drops any later `currentTime` assignment (tap-to-jump lands
  * back at 0 instead of the tapped word).
  */
-function sendAudioBuffer(req: Request, res: Response, buffer: Buffer): void {
+function sendAudioBuffer(req: Request, res: Response, buffer: Buffer, cacheControl: string): void {
   res.setHeader('Content-Type', 'audio/mpeg')
-  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+  res.setHeader('Cache-Control', cacheControl)
   res.setHeader('Accept-Ranges', 'bytes')
 
   const range = req.headers.range
@@ -203,7 +203,9 @@ documentsRouter.get('/:id/chunks/:sequenceIndex/audio', async (req, res) => {
 
   try {
     const buffer = await getObjectBuffer(chunk.audioKey)
-    sendAudioBuffer(req, res, buffer)
+    // Immutable: a chunk's audio is never regenerated once ready
+    // (CLAUDE.md — "cache aggressively").
+    sendAudioBuffer(req, res, buffer, 'public, max-age=31536000, immutable')
   } catch (err) {
     console.error('Failed to load chunk audio:', err)
     res.status(500).json({ error: 'Failed to load audio' })
@@ -215,11 +217,30 @@ function mergedAudioKeyFor(documentId: string): string {
 }
 
 /**
- * Concatenates every ready chunk's MP3 into one file so playback can cross
- * section boundaries without the brief reload each chunk-swap causes today.
- * Idempotent and doesn't touch ElevenLabs — it only stitches together audio
- * that's already been generated, cached at a deterministic storage key so a
- * repeat click (or an already-merged document) is a no-op.
+ * How much of the document's audio can be merged right now: generation runs
+ * strictly in sequence (generateRemainingChunksInBackground in
+ * services/generation.ts), so a chunk is never `ready` while an earlier one
+ * is still `pending` — the first `pending` chunk is therefore the frontier,
+ * and everything before it has been resolved one way or another. `error`
+ * chunks don't stop the frontier; they're permanently skipped, same as
+ * playableIndexFrom does for normal per-chunk playback.
+ */
+function resolvedChunkCount(chunks: { status: string }[]): number {
+  const pendingIndex = chunks.findIndex((c) => c.status === 'pending')
+  return pendingIndex === -1 ? chunks.length : pendingIndex
+}
+
+/**
+ * Concatenates every *resolved* chunk's MP3 into one file, so playback can
+ * cross section boundaries without the reload each chunk-swap otherwise
+ * causes — without waiting for the whole document to finish generating
+ * first. Re-running this later, once more chunks have resolved, produces a
+ * longer file at the same key; useReaderPlayback.ts calls it again whenever
+ * playback catches up to the end of what's currently merged, so the single
+ * continuous player keeps extending itself as generation continues instead
+ * of stopping there. `chunkCount` in the response tells the caller how many
+ * chunks (from the front) the returned file now covers, and `complete`
+ * says whether that's the whole document or there's still more coming.
  */
 documentsRouter.post('/:id/merge', async (req, res) => {
   const document = await getDocument(req.params.id)
@@ -229,24 +250,18 @@ documentsRouter.post('/:id/merge', async (req, res) => {
   }
 
   const chunks = await getChunksForDocument(document.id)
-  if (chunks.length === 0 || chunks.some((c) => c.status !== 'ready')) {
-    res.status(409).json({ error: 'All sections must finish generating before they can be merged.' })
+  const resolvedCount = resolvedChunkCount(chunks)
+  const readyChunks = chunks.slice(0, resolvedCount).filter((c) => c.status === 'ready')
+
+  if (readyChunks.length === 0) {
+    res.status(409).json({ error: 'No sections are ready to merge yet.' })
     return
   }
 
-  const mergedKey = mergedAudioKeyFor(document.id)
   try {
-    await getObjectBuffer(mergedKey)
-    res.json({ merged: true })
-    return
-  } catch {
-    // Not merged yet — fall through and generate it below.
-  }
-
-  try {
-    const buffers = await Promise.all(chunks.map((c) => getObjectBuffer(c.audioKey!)))
-    await putObject(mergedKey, Buffer.concat(buffers), 'audio/mpeg')
-    res.json({ merged: true })
+    const buffers = await Promise.all(readyChunks.map((c) => getObjectBuffer(c.audioKey!)))
+    await putObject(mergedAudioKeyFor(document.id), Buffer.concat(buffers), 'audio/mpeg')
+    res.json({ merged: true, chunkCount: resolvedCount, complete: resolvedCount === chunks.length })
   } catch (err) {
     console.error('Failed to merge chunk audio:', err)
     res.status(500).json({ error: 'Failed to merge audio' })
@@ -262,7 +277,10 @@ documentsRouter.get('/:id/merged-audio', async (req, res) => {
 
   try {
     const buffer = await getObjectBuffer(mergedAudioKeyFor(document.id))
-    sendAudioBuffer(req, res, buffer)
+    // Not immutable: unlike a chunk, this file grows in place at the same
+    // key as more chunks resolve (see POST /merge above), so a cached copy
+    // would go stale mid-read.
+    sendAudioBuffer(req, res, buffer, 'no-store')
   } catch {
     res.status(404).json({ error: 'Merged audio not generated yet' })
   }

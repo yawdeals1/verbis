@@ -123,5 +123,7 @@ export function mergedAudioUrl(documentId: string): string {
 }
 
 export function mergeDocumentAudio(documentId: string) {
-  return request<{ merged: true }>(`/documents/${documentId}/merge`, { method: 'POST' })
+  return request<{ merged: true; chunkCount: number; complete: boolean }>(`/documents/${documentId}/merge`, {
+    method: 'POST',
+  })
 }

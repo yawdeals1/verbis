@@ -12,16 +12,16 @@ A personal read-aloud app: import a PDF/DOCX or a photo of a book page, get it r
 - **Backend**: Node/Express, self-hosted on Deploro VPS compute (needed for `@google-cloud/vision`, `jsdom`, and local-disk storage, none of which run on Deploro's Cloudflare Worker path).
 - **Database**: Deploro's per-project Studio REST API (`backend/src/db/studioClient.ts`), not a direct Postgres connection — same for local dev and production, both point at the same Deploro-hosted `verbis` project via `DEPLORO_API_URL`/`DEPLORO_API_TOKEN`.
 - **File/audio storage**: Deploro project storage (R2) via its HTTP storage API, selected by `DEPLORO_STORAGE_URL` (`backend/src/storage/deploroStorage.ts`). Falls through to an S3-compatible bucket when the `S3_*` vars are set, then to local disk (`backend/storage/`) when neither is (`backend/src/storage/index.ts`).
-- **TTS**: ElevenLabs, `/v1/text-to-speech/{voice_id}/with-timestamps`.
+- **TTS**: Speechify (`POST /v1/audio/speech`, default) or ElevenLabs (`/v1/text-to-speech/{voice_id}/with-timestamps`), selected by `TTS_PROVIDER`. Both return the same character-anchored word timings, so previously generated audio stays valid across a switch.
 - **OCR**: Google Cloud Vision, Document Text Detection mode.
 - **Summarization/Q&A (Phase 4)**: local Ollama model (default `gemma4`, configurable via `OLLAMA_MODEL`) — no API key, no per-token billing.
 
-No other providers should be introduced for these roles without discussing it first — each was chosen deliberately (see `PRODUCT_PLAN.md` §2) and swapping one has knock-on effects (e.g. only ElevenLabs' `with-timestamps` endpoint gives the character-level alignment the highlighting feature depends on).
+No other providers should be introduced for these roles without discussing it first — each was chosen deliberately (see `PRODUCT_PLAN.md` §2) and swapping one has knock-on effects (e.g. both TTS backends must keep returning character-anchored word timing, since the highlighting feature depends on it).
 
 ## Architectural Rules
 
-- **Secrets never reach the client.** ElevenLabs and Google Cloud Vision calls happen server-side only, from the Express API. The PWA never holds these API keys.
-- **Timing data is character-level, not word-level.** ElevenLabs returns `char_start_times_ms`/`char_end_times_ms` per character. Word boundaries must be derived by splitting the source text on whitespace and tracking character offsets — don't assume the provider gives you pre-grouped words.
+- **Secrets never reach the client.** Speechify, ElevenLabs, and Google Cloud Vision calls happen server-side only, from the Express API. The PWA never holds these API keys.
+- **Timing data is character-level, not word-level.** ElevenLabs returns `char_start_times_ms`/`char_end_times_ms` per character; Speechify returns nested speech marks with `start`/`end` character offsets and `start_time`/`end_time`. Word boundaries must be derived by splitting the source text on whitespace and tracking character offsets — don't assume either provider gives you pre-grouped words.
 - **Chunking is the seek/cache boundary.** Text is split into sentence- or paragraph-sized chunks before TTS generation. Each chunk gets one audio file + one timing blob, stored together and keyed to the chunk row. Tap-to-jump resolves a tapped word → character offset → chunk's timing data → timestamp → `<audio>.currentTime` seek. Don't build seeking logic that spans chunk boundaries implicitly; jumping across chunks means loading the target chunk's audio first.
 - **Generate the first chunk before the rest.** Playback should start within 5-8 seconds of upload. Generate chunk 1 synchronously (or near it), then generate remaining chunks in the background while playback continues.
 - **Cache aggressively.** Once a chunk's audio is generated, never regenerate it. Both TTS and OCR are metered APIs — re-synthesis on re-listen is a cost bug, not just a performance one.
@@ -36,13 +36,13 @@ See `PRODUCT_PLAN.md` §4 for the full `documents` / `chunks` / `voices` / `read
 
 Follow the phase order in `PRODUCT_PLAN.md` §5 — don't jump ahead to Phase 2 (scan/OCR) or Phase 4 (summarization/Q&A/sync) work before Phase 1 (core PDF/DOCX loop with synced highlighting) is solid. The highlighting sync is the feature that makes or breaks the product; get it right on the simplest input path (PDF/DOCX) before adding OCR noise on top.
 
-**Status**: Phases 1–4 are implemented (multi-device sync excluded by design — see `PRODUCT_PLAN.md` §5). The database layer is verified end-to-end against the real Deploro `verbis` project. ElevenLabs/Google Cloud Vision/Ollama routes still need real keys in `backend/.env` before they're exercised for real.
+**Status**: Phases 1–4 are implemented (multi-device sync excluded by design — see `PRODUCT_PLAN.md` §5). The database layer is verified end-to-end against the real Deploro `verbis` project. Speechify/ElevenLabs/Google Cloud Vision/Ollama routes still need real keys in `backend/.env` before they're exercised for real.
 
 ## Known Open Risks
 
 - OCR accuracy on real handheld book photos is unvalidated — test against real varied-lighting/angle photos early in Phase 2, don't assume Cloud Vision's quoted accuracy holds.
 - Chunking granularity (sentence vs. paragraph) trades off API call volume against highlight/seek smoothness — worth prototyping both before locking in.
-- ElevenLabs free tier is ~10K characters/month — track usage once past prototyping, this will be exceeded fast.
+- ElevenLabs free tier is ~10K characters/month — track usage once past prototyping, this will be exceeded fast. Speechify is metered per character too; same tracking applies if it becomes the primary backend long-term.
 
 ## Conventions
 

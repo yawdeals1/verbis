@@ -1,9 +1,15 @@
-// Sized so Kokoro never splits a request into more than one sub-chunk, which
-// is what actually keeps synthesis alive on this host — see the token settings
-// in deploro.compose.yml. Small enough that even number-heavy text (a "1.1"
-// phonemizes to three tokens) stays under one pass, which costs a lot of
-// chunks per document but is the difference between audio and no audio.
-const MAX_CHUNK_CHARS = 90
+// Sized against spoken pace (~150 wpm, ~5.7 chars/word incl. the trailing
+// space -> ~14 chars/sec) to land each chunk in the 45s-2min range: short
+// enough to start playback fast and keep seeking within a chunk cheap, long
+// enough that per-chunk reloads (see the "merge all sections" seam in
+// useReaderPlayback.ts) aren't constant. Speechify is a hosted API with no
+// per-request memory constraint to size against, unlike the old self-hosted
+// Kokoro backend this replaced — that's what allowed raising this at all.
+// Ceiling, not just a preference: Speechify caps SSML input at 2000 chars of
+// actual text (5000 including tags), and speechify.ts wraps every chunk in
+// `<speak>...</speak>` before sending it — this has to stay well under that
+// or synthesis starts failing outright.
+const MAX_CHUNK_CHARS = 1200
 
 const SENTENCE_SPLIT = /(?<=[.!?])\s+(?=[A-Z0-9"'“(])/
 

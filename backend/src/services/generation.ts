@@ -1,4 +1,4 @@
-import { synthesizeChunk, waitForProviderReady } from './tts.js'
+import { synthesizeChunk } from './tts.js'
 import { putObject } from '../storage/index.js'
 import { markChunkError, markChunkReady } from '../db/chunks.js'
 import { updateDocumentStatus } from '../db/documents.js'
@@ -10,22 +10,18 @@ function audioKeyFor(documentId: string, sequenceIndex: number): string {
 
 const MAX_SYNTHESIS_ATTEMPTS = 3
 const MAX_LEAD_CHUNK_ATTEMPTS = 3
-const READY_WAIT_MS = 180_000
-const FALLBACK_RETRY_DELAY_MS = 20_000
+const RETRY_BASE_DELAY_MS = 5_000
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
- * Retries a chunk whose synthesis died mid-request.
+ * Retries a chunk whose synthesis failed.
  *
- * A self-hosted TTS container is a process that can be killed and restarted,
- * unlike a metered API that answers or returns an error — when it goes down
- * the socket simply closes with no response, and the same text succeeds once
- * it is back. Recovery is dominated by reloading and warming the model, which
- * measured at 45-60s, so this waits on an actual readiness probe rather than
- * a fixed delay: the previous fixed 20s expired while the container was still
- * loading, so every retry failed on a refused connection instead of getting a
- * real second attempt.
+ * Both backends are metered hosted APIs, so the failures worth retrying are
+ * rate limits and transient 5xx/socket errors — a bad voice ID or malformed
+ * text fails identically every time and just costs three attempts before the
+ * caller sees it. Backoff grows so a 429 isn't answered by two more requests
+ * inside the same window.
  */
 async function synthesizeWithRetry(text: string, voiceProviderVoiceId: string) {
   for (let attempt = 1; ; attempt++) {
@@ -34,11 +30,10 @@ async function synthesizeWithRetry(text: string, voiceProviderVoiceId: string) {
     } catch (err) {
       if (attempt >= MAX_SYNTHESIS_ATTEMPTS) throw err
       console.warn(
-        `[tts] synthesis attempt ${attempt}/${MAX_SYNTHESIS_ATTEMPTS} failed, waiting for the backend to come back:`,
+        `[tts] synthesis attempt ${attempt}/${MAX_SYNTHESIS_ATTEMPTS} failed, retrying:`,
         err instanceof Error ? err.message : err,
       )
-      const ready = await waitForProviderReady(READY_WAIT_MS)
-      if (!ready) await sleep(FALLBACK_RETRY_DELAY_MS)
+      await sleep(RETRY_BASE_DELAY_MS * attempt)
     }
   }
 }
@@ -82,10 +77,9 @@ export function generateRemainingChunksInBackground(
  *
  * Falls forward instead of failing the document when a lead chunk can't be
  * synthesized. Front matter — a table of contents, a bare heading list — is
- * both the least worth hearing and the most likely to break synthesis (no
- * sentence punctuation to split on, so it produces the largest forward pass),
- * and a 52-chunk document is not unreadable because its contents page is.
- * Chunks that fail are left marked `error` so the reader skips them.
+ * both the least worth hearing and the most likely to break synthesis, and a
+ * 52-chunk document is not unreadable because its contents page is. Chunks
+ * that fail are left marked `error` so the reader skips them.
  */
 export async function processDocument(documentId: string, voiceProviderVoiceId: string, chunks: ChunkRow[]): Promise<void> {
   if (chunks.length === 0) {

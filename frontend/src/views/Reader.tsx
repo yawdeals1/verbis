@@ -32,6 +32,8 @@ export default function Reader() {
     isMerging,
     mergeError,
     canMerge,
+    mergedComplete,
+    isBufferingMore,
     handlers,
     actions,
   } = useReaderPlayback(documentId)
@@ -108,12 +110,20 @@ export default function Reader() {
             className="merge-button"
             onClick={actions.mergeAudio}
             disabled={!canMerge || isMerging}
-            title={canMerge ? undefined : 'All sections must finish generating first'}
+            title={canMerge ? undefined : 'The first section needs to finish generating first'}
           >
             {isMerging ? 'Merging…' : 'Merge all sections'}
           </button>
         )}
-        {mergedMode && <span className="reader-meta">Playing as one continuous file</span>}
+        {mergedMode && (
+          <span className="reader-meta">
+            {mergedComplete
+              ? 'Playing as one continuous file'
+              : isBufferingMore
+                ? 'Playing as one continuous file (waiting on the next section…)'
+                : 'Playing as one continuous file (still generating more…)'}
+          </span>
+        )}
       </div>
       {mergeError && <p role="alert">{mergeError}</p>}
 

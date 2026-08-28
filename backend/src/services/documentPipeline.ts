@@ -23,8 +23,8 @@ export class NoTextExtractedError extends Error {
  *
  * Every lookup is provider-scoped: `voices` accumulates rows from whichever
  * backends have been used, and a provider voice ID is meaningless to a
- * different provider (an ElevenLabs UUID passed to Kokoro is not a voice, it
- * is a 400). So a requested voice belonging to another provider is
+ * different provider (an ElevenLabs UUID passed to Speechify is not a voice,
+ * it is a 400). So a requested voice belonging to another provider is
  * deliberately ignored rather than honored.
  */
 export async function resolveVoice(voiceId: string | undefined): Promise<VoiceRow> {

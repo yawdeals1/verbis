@@ -12,7 +12,7 @@ Verbis — a personal read-aloud app for PDFs, Word docs, and scanned book pages
 - Backend: Node/Express, self-hosted on Deploro VPS compute (needs a real Node runtime — `@google-cloud/vision`, `jsdom`, and local-disk storage don't run on Deploro's Cloudflare Worker path).
 - Database: Deploro's per-project Studio REST API (`backend/src/db/studioClient.ts`), not a direct Postgres connection. Same database for local dev and production — both point at the same Deploro-hosted `verbis` project.
 - Storage: Deploro project storage (R2) in production for originals + generated audio, over its HTTP storage API (`backend/src/storage/deploroStorage.ts`), selected by `DEPLORO_STORAGE_URL`. Falls through to an S3-compatible bucket when the `S3_*` vars are set, then to local disk under `backend/storage/`, so the app runs with no storage infra at all. Deploro reaches R2 through a Cloudflare Workers binding and issues no S3 keys for it — do not try to configure it as an `S3_ENDPOINT`.
-- TTS: ElevenLabs (`with-timestamps` endpoint — character-level alignment).
+- TTS: Speechify (`POST /v1/audio/speech`, default — nested speech marks give character-level alignment) or ElevenLabs (`with-timestamps` endpoint), selected by `TTS_PROVIDER`.
 - OCR: Google Cloud Vision (Document Text Detection).
 - Summarization/Q&A (Phase 4): local Ollama model (default `gemma4`, configurable via `OLLAMA_MODEL`/`OLLAMA_BASE_URL`) — no API key, no per-token billing.
 
@@ -21,7 +21,7 @@ Do not substitute any of these providers or hosting targets without discussing i
 ## Setup / Build / Test
 
 1. One-time, via the Deploro CLI: `deploro use verbis`, `deploro db create`, `deploro migrate create init --up-file backend/src/db/schema.sql` + `deploro migrate apply init`, then `deploro token create verbis-backend --read --write --project verbis` for a `DEPLORO_API_TOKEN` (needs both scopes — write-only fails on every read call).
-2. `cd backend && npm install`, copy `.env.example` to `.env` (or edit the existing `.env`) and fill in `ELEVENLABS_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `DEPLORO_API_URL` (`<deploro baseUrl>/api/projects/<id>/studio`), `DEPLORO_API_TOKEN`, and `DEPLORO_STORAGE_URL` (the same URL *without* `/studio` — storage routes are siblings of the Studio API, and writes need a project-admin token). Leave `DEPLORO_STORAGE_URL` and `S3_*` blank to use local disk storage instead.
+2. `cd backend && npm install`, copy `.env.example` to `.env` (or edit the existing `.env`) and fill in `SPEECHIFY_API_KEY` (default TTS backend; get one from https://platform.speechify.ai/api-keys — set `TTS_PROVIDER=elevenlabs` and `ELEVENLABS_API_KEY` instead to use ElevenLabs), `GOOGLE_APPLICATION_CREDENTIALS`, `DEPLORO_API_URL` (`<deploro baseUrl>/api/projects/<id>/studio`), `DEPLORO_API_TOKEN`, and `DEPLORO_STORAGE_URL` (the same URL *without* `/studio` — storage routes are siblings of the Studio API, and writes need a project-admin token). Leave `DEPLORO_STORAGE_URL` and `S3_*` blank to use local disk storage instead.
 3. Install [Ollama](https://ollama.com), run `ollama pull gemma4` (or a variant: `gemma4:e2b`/`e4b`/`26b`/`31b`), and start it with `ollama serve`. `OLLAMA_BASE_URL`/`OLLAMA_MODEL` in `.env` default to `http://localhost:11434`/`gemma4`.
 4. `npm run dev` (backend/) — starts the API on `PORT` (default 3001). `npm run typecheck` / `npm run build` also available.
 5. `cd frontend && npm install && npm run dev` — starts the Vite dev server (default 5173), reading `VITE_API_BASE_URL` from `frontend/.env`. `npx tsc -b` typechecks, `npm run build` produces the PWA build.
@@ -33,11 +33,11 @@ No automated test suite yet — verification today is `tsc`/`tsc -b` on both pro
 - No comments explaining *what* code does — clear naming should make that unnecessary. Comments only for non-obvious *why* (provider quirks, workarounds, subtle invariants).
 - No speculative abstractions: don't build provider-swap interfaces, config layers, or feature flags for things not in the current build phase.
 - No auth/multi-tenant scaffolding — single-user personal tool for v1 (see PRD non-goals).
-- Secrets (ElevenLabs key, Google Cloud Vision credentials, DB/storage credentials) live server-side only, injected into the Deploro-hosted API. Never ship them to the PWA client or commit them to the repo.
+- Secrets (Speechify key, ElevenLabs key, Google Cloud Vision credentials, DB/storage credentials) live server-side only, injected into the Deploro-hosted API. Never ship them to the PWA client or commit them to the repo.
 
 ## Architectural Rules (must-follow)
 
-1. **Character-level timing → word boundaries derived, not assumed.** ElevenLabs returns per-character `char_start_times_ms`/`char_end_times_ms`. Split source text on whitespace, track character offsets, and map those offsets onto the returned timing to get word-level highlight boundaries.
+1. **Character-level timing → word boundaries derived, not assumed.** ElevenLabs returns per-character `char_start_times_ms`/`char_end_times_ms`; Speechify returns nested speech marks with `start`/`end` character offsets and `start_time`/`end_time`. Split source text on whitespace, track character offsets, and map those offsets onto the returned timing to get word-level highlight boundaries.
 2. **Chunk-scoped audio and timing.** Text is split into sentence/paragraph-sized chunks before TTS generation; each chunk has exactly one audio file and one timing blob, stored together. Seeking/tap-to-jump within a chunk uses that chunk's timing data; jumping to a different chunk means loading that chunk's audio first.
 3. **First chunk fast, rest in background.** Target under 5-8 seconds from upload to audio start: generate/return chunk 1 first, generate subsequent chunks asynchronously while playback continues.
 4. **Generate once, cache forever.** Never re-run TTS or OCR for content already processed — both are metered, billed APIs. Re-listening to a document must not re-trigger synthesis.
@@ -62,4 +62,4 @@ Work in phase order from `PRODUCT_PLAN.md` §5 — do not start Phase 2 (camera 
 
 - OCR accuracy on real handheld book photos (varied lighting/angle/font) is unvalidated — test early in Phase 2 rather than trusting quoted provider accuracy.
 - Chunking granularity (sentence vs. paragraph) is a cost/smoothness tradeoff, not yet settled by prototyping.
-- ElevenLabs free tier (~10K characters/month) is small — usage tracking matters once past initial prototyping.
+- ElevenLabs free tier (~10K characters/month) is small — usage tracking matters once past initial prototyping. Speechify bills per character too; track usage there as well if it stays the default backend.

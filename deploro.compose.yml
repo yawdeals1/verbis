@@ -30,7 +30,9 @@ services:
       DEPLORO_API_URL: ${DEPLORO_API_URL}
       DEPLORO_API_TOKEN: ${DEPLORO_API_TOKEN}
       TTS_PROVIDER: ${TTS_PROVIDER}
-      KOKORO_BASE_URL: ${KOKORO_BASE_URL}
+      SPEECHIFY_API_KEY: ${SPEECHIFY_API_KEY}
+      SPEECHIFY_BASE_URL: ${SPEECHIFY_BASE_URL}
+      SPEECHIFY_MODEL: ${SPEECHIFY_MODEL}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
       ELEVENLABS_MODEL_ID: ${ELEVENLABS_MODEL_ID}
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
@@ -53,62 +55,6 @@ services:
       # separate, deliberate change.
       - verbis-storage:/app/storage
     restart: unless-stopped
-
-  # Self-hosted Kokoro-82M TTS (Apache 2.0), reachable only over the
-  # compose-internal network at http://kokoro:8880 — no published port, same
-  # as `backend`.
-  #
-  # It comes up healthy and stays healthy idle (~1.1GB resident, 68 voice
-  # packs, model warmed in 8.4s) and serves /v1/audio/voices fine, but a
-  # first attempt died on every synthesis request: no access-log line, no
-  # traceback, socket closed with 0 bytes read, container back at a fresh
-  # startup banner. That signature is a hard kill (SIGKILL/segfault), not a
-  # Python-level error — which narrows it to host memory or the upstream
-  # crash bug in this endpoint, and does not by itself distinguish them.
-  #
-  # The thread caps below are the cheap half of that fix. PyTorch CPU
-  # inference allocates per-thread memory arenas and defaults to one thread
-  # per core, so on a shared box it both spikes RSS and fights every other
-  # project for CPU. Pinning to 2 bounds the transient allocation that the
-  # kill happens during. mem_limit is deliberately NOT the constraint being
-  # tuned here — upstream measures ~1.15GB resident after serving a request,
-  # well under this cap.
-  kokoro:
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
-    environment:
-      OMP_NUM_THREADS: "2"
-      MKL_NUM_THREADS: "2"
-      WEB_CONCURRENCY: "1"
-      # Upstream issue #453: each request does a voice-tensor round trip that
-      # leaves ~20-30MB of transient allocations behind, fragmenting the heap
-      # so RSS climbs monotonically and never returns. glibc makes that worse
-      # by giving every thread its own arena, so freed blocks in one arena
-      # cannot satisfy an allocation in another. Capping the arena count is
-      # the standard mitigation and matches what we see: synthesis succeeds
-      # on a freshly restarted container and dies once requests have
-      # accumulated, regardless of how short the text is.
-      MALLOC_ARENA_MAX: "2"
-      # Kokoro leaks ~20-30MB per SUB-chunk (upstream #453: each one does a
-      # voice-tensor round trip whose transient allocations never return), and
-      # it re-splits every request into sub-chunks of its own. On a host with
-      # ~210MB free and no swap, that means a request dies partway through —
-      # observed dying after 2 sub-chunks, then after 4, having synthesized the
-      # earlier ones fine. Peak pass size is NOT the trigger: 42-token passes
-      # died, while every request that ever succeeded was a single sub-chunk.
-      #
-      # So these are set HIGH on purpose, the opposite of the obvious reading.
-      # Combined with a small MAX_CHUNK_CHARS, they guarantee one sub-chunk per
-      # request — one voice-tensor round trip, one leak increment — instead of
-      # several. Lowering them splits requests further and kills the container
-      # sooner.
-      TARGET_MIN_TOKENS: "100"
-      TARGET_MAX_TOKENS: "250"
-      ABSOLUTE_MAX_TOKENS: "300"
-    restart: unless-stopped
-    cpus: 2.0
-    mem_limit: 4g
-    expose:
-      - "8880"
 
   frontend:
     build:
