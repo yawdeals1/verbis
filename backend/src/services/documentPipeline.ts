@@ -3,7 +3,9 @@ import { putObject } from '../storage/index.js'
 import { createDocument, updateDocumentStatus, updatePageLayout } from '../db/documents.js'
 import { createChunks } from '../db/chunks.js'
 import { getVoice, listVoiceRows, upsertVoice } from '../db/voices.js'
+import { mapWithConcurrency } from '../lib/concurrency.js'
 import { activeProvider, listVoices as listProviderVoices } from './tts.js'
+import { regionRank } from './ttsTypes.js'
 import { splitIntoChunks } from './chunking.js'
 import { processDocument } from './generation.js'
 import { extractPdfLayout } from './pdfLayout.js'
@@ -36,14 +38,20 @@ export async function resolveVoice(voiceId: string | undefined): Promise<VoiceRo
   }
 
   const existing = await listVoiceRows()
-  const forProvider = existing.filter((voice) => voice.provider === provider)
+  const forProvider = existing
+    .filter((voice) => voice.provider === provider)
+    .sort((a, b) => regionRank(a.locale) - regionRank(b.locale))
   if (forProvider.length > 0) return forProvider[0]
 
   const remoteVoices = await listProviderVoices()
-  const synced = await Promise.all(
-    remoteVoices.map((v) =>
-      upsertVoice({ provider, providerVoiceId: v.providerVoiceId, displayName: v.displayName }),
-    ),
+  const synced = await mapWithConcurrency(remoteVoices, 8, (v) =>
+    upsertVoice({
+      provider,
+      providerVoiceId: v.providerVoiceId,
+      displayName: v.displayName,
+      locale: v.locale ?? null,
+      previewAudioUrl: v.previewAudioUrl ?? null,
+    }),
   )
   if (synced.length === 0) throw new Error(`No ${provider} voices available to assign to this document.`)
   return synced[0]

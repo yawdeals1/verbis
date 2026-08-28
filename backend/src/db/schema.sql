@@ -10,6 +10,13 @@ CREATE TABLE IF NOT EXISTS voices (
   provider TEXT NOT NULL,
   provider_voice_id TEXT NOT NULL,
   display_name TEXT NOT NULL,
+  -- BCP-47 locale (e.g. "en-US"), used to rank American/British voices
+  -- first in the picker (see regionRank in services/ttsTypes.ts). Added by
+  -- migrations/add_voice_locale_and_preview.sql.
+  locale TEXT,
+  -- A short hosted sample clip so a voice can be heard before any text is
+  -- synthesized against it. Added by the same migration.
+  preview_audio_url TEXT,
   UNIQUE (provider, provider_voice_id)
 );
 

@@ -1,6 +1,6 @@
 import { env } from '../config/env.js'
 import type { WordTiming } from '../types/timing.js'
-import type { SynthesizeResult, VoiceOption } from './ttsTypes.js'
+import { regionRank, type SynthesizeResult, type VoiceOption } from './ttsTypes.js'
 
 /**
  * One entry of Speechify's speech marks tree. The top-level mark covers the
@@ -308,6 +308,13 @@ interface SpeechifyVoice {
   display_name?: string
   gender?: string
   locale?: string
+  preview_audio?: string
+}
+
+interface SpeechifyVoicesPage {
+  voices: SpeechifyVoice[]
+  next_cursor?: string
+  has_more?: boolean
 }
 
 function displayNameFor(voice: SpeechifyVoice): string {
@@ -318,18 +325,20 @@ function displayNameFor(voice: SpeechifyVoice): string {
   return details ? `${name} — ${details}` : name
 }
 
-// One page, no cursor loop: GET /voices syncs every returned voice into the
-// `voices` table one row at a time over the Studio REST API, so pulling the
-// whole catalog would cost hundreds of round trips per request for a picker
-// nobody scrolls that far down.
-const VOICE_PAGE_SIZE = 25
+// 100 (the API's max) rather than a small page: the full catalog is ~1000
+// voices, and it all has to be paged through anyway to find every en-US/
+// en-GB voice for the region sort below — they're scattered through the
+// catalog by name, not grouped by locale, so no page-count cap can promise
+// to have seen all of them.
+const VOICE_PAGE_SIZE = 100
 
-export async function listVoices(): Promise<VoiceOption[]> {
+async function fetchVoicePage(cursor: string | undefined): Promise<SpeechifyVoicesPage> {
   const url = new URL(`${env.speechifyBaseUrl}/voices`)
   // Voice availability is per-model, so an unfiltered list would offer
   // voices the configured model rejects at synthesis time.
   url.searchParams.set('model', env.speechifyModel)
   url.searchParams.set('limit', String(VOICE_PAGE_SIZE))
+  if (cursor) url.searchParams.set('cursor', cursor)
 
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${env.speechifyApiKey}` },
@@ -339,10 +348,45 @@ export async function listVoices(): Promise<VoiceOption[]> {
     throw new Error(`Speechify voice listing failed (${response.status}): ${await response.text()}`)
   }
 
-  const data = (await response.json()) as SpeechifyVoice[] | { voices?: SpeechifyVoice[] }
-  const voices = Array.isArray(data) ? data : (data.voices ?? [])
+  const data = (await response.json()) as SpeechifyVoicesPage | SpeechifyVoice[]
+  return Array.isArray(data) ? { voices: data } : data
+}
 
+function isIndianLocale(locale: string | undefined): boolean {
+  return locale?.endsWith('-IN') ?? false
+}
+
+// The full catalog takes ~10 sequential paginated requests, so it's fetched
+// once and reused rather than repeated on every GET /voices (see routes/
+// voices.ts) — the catalog itself barely changes.
+const VOICE_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+let voiceCache: { voices: VoiceOption[]; fetchedAt: number } | null = null
+
+export async function listVoices(): Promise<VoiceOption[]> {
+  if (voiceCache && Date.now() - voiceCache.fetchedAt < VOICE_CACHE_TTL_MS) {
+    return voiceCache.voices
+  }
+
+  const allVoices: SpeechifyVoice[] = []
+  let cursor: string | undefined
+  do {
+    const page = await fetchVoicePage(cursor)
+    allVoices.push(...page.voices)
+    cursor = page.has_more ? page.next_cursor : undefined
+  } while (cursor)
+
+  const voices = allVoices
+    .filter((voice) => typeof voice?.id === 'string' && voice.id.length > 0 && !isIndianLocale(voice.locale))
+    .map((voice) => ({
+      providerVoiceId: voice.id,
+      displayName: displayNameFor(voice),
+      locale: voice.locale,
+      previewAudioUrl: voice.preview_audio,
+    }))
+    // Array#sort is stable (ES2019+), so voices keep the catalog's own
+    // relative order within each rank.
+    .sort((a, b) => regionRank(a.locale) - regionRank(b.locale))
+
+  voiceCache = { voices, fetchedAt: Date.now() }
   return voices
-    .filter((voice) => typeof voice?.id === 'string' && voice.id.length > 0)
-    .map((voice) => ({ providerVoiceId: voice.id, displayName: displayNameFor(voice) }))
 }

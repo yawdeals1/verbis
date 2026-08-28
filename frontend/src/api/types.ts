@@ -75,6 +75,8 @@ export interface Voice {
   provider: string
   providerVoiceId: string
   displayName: string
+  locale: string | null
+  previewAudioUrl: string | null
 }
 
 export interface DocumentDetail {

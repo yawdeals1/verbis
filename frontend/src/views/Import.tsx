@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { importUrl, listVoices, uploadDocument, uploadScan } from '../api/client'
 import type { Voice } from '../api/types'
@@ -10,6 +10,8 @@ export default function Import() {
   const [mode, setMode] = useState<Mode>('file')
   const [voices, setVoices] = useState<Voice[]>([])
   const [voiceId, setVoiceId] = useState<string>('')
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null)
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [scanTitle, setScanTitle] = useState('')
   const [url, setUrl] = useState('')
@@ -27,6 +29,28 @@ export default function Import() {
         // to a default voice server-side if none is supplied.
       })
   }, [])
+
+  useEffect(() => {
+    previewAudioRef.current?.pause()
+    setPreviewingVoiceId(null)
+  }, [voiceId])
+
+  const selectedVoice = voices.find((v) => v.id === voiceId)
+
+  const togglePreview = () => {
+    const audio = previewAudioRef.current
+    if (!audio || !selectedVoice?.previewAudioUrl) return
+
+    if (previewingVoiceId === selectedVoice.id) {
+      audio.pause()
+      setPreviewingVoiceId(null)
+      return
+    }
+
+    audio.src = selectedVoice.previewAudioUrl
+    audio.play().catch(() => {})
+    setPreviewingVoiceId(selectedVoice.id)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -116,16 +140,28 @@ export default function Import() {
         )}
 
         {voices.length > 0 && (
-          <label>
-            Voice
-            <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
-              {voices.map((voice) => (
-                <option key={voice.id} value={voice.id}>
-                  {voice.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="voice-picker">
+            <label>
+              Voice
+              <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+                {voices.map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedVoice?.previewAudioUrl && (
+              <button type="button" onClick={togglePreview}>
+                {previewingVoiceId === selectedVoice.id ? 'Stop preview' : 'Preview voice'}
+              </button>
+            )}
+            <audio
+              ref={previewAudioRef}
+              onEnded={() => setPreviewingVoiceId(null)}
+              style={{ display: 'none' }}
+            />
+          </div>
         )}
 
         {error && <p role="alert">{error}</p>}

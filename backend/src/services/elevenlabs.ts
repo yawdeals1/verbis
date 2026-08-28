@@ -105,10 +105,12 @@ export async function listVoices(): Promise<VoiceOption[]> {
       return FALLBACK_VOICES
     }
 
-    const data = (await response.json()) as { voices: { voice_id: string; name: string }[] }
+    const data = (await response.json()) as { voices: { voice_id: string; name: string; preview_url?: string }[] }
     if (!data.voices?.length) return FALLBACK_VOICES
 
-    return data.voices.slice(0, 5).map((v) => ({ providerVoiceId: v.voice_id, displayName: v.name }))
+    return data.voices
+      .slice(0, 5)
+      .map((v) => ({ providerVoiceId: v.voice_id, displayName: v.name, previewAudioUrl: v.preview_url }))
   } catch (err) {
     console.error('ElevenLabs voice listing threw, using fallback voice IDs:', err)
     return FALLBACK_VOICES

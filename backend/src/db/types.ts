@@ -43,4 +43,6 @@ export interface VoiceRow {
   provider: string
   providerVoiceId: string
   displayName: string
+  locale: string | null
+  previewAudioUrl: string | null
 }
