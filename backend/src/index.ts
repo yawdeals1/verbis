@@ -4,6 +4,7 @@ import { env } from './config/env.js'
 import { healthRouter } from './routes/health.js'
 import { documentsRouter } from './routes/documents.js'
 import { voicesRouter } from './routes/voices.js'
+import { foldersRouter } from './routes/folders.js'
 
 const app = express()
 
@@ -13,6 +14,7 @@ app.use(express.json())
 app.use('/health', healthRouter)
 app.use('/documents', documentsRouter)
 app.use('/voices', voicesRouter)
+app.use('/folders', foldersRouter)
 
 // Catches errors thrown/rejected anywhere in the routers above (Express 5
 // forwards rejected async handlers here automatically) so a missing

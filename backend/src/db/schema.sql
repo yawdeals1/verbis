@@ -20,12 +20,21 @@ CREATE TABLE IF NOT EXISTS voices (
   UNIQUE (provider, provider_voice_id)
 );
 
+CREATE TABLE IF NOT EXISTS folders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
   source_type TEXT NOT NULL CHECK (source_type IN ('pdf', 'docx', 'txt', 'epub', 'scan', 'url')),
   original_file_key TEXT NOT NULL,
   voice_id UUID REFERENCES voices(id),
+  -- Nullable: a document with no folder is "unfiled". ON DELETE SET NULL so
+  -- removing a folder un-files its documents instead of deleting them.
+  folder_id UUID REFERENCES folders(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing', 'ready', 'error')),
   error_message TEXT,
   last_position JSONB,

@@ -10,12 +10,19 @@ export interface LastPosition {
   timeSeconds: number
 }
 
+export interface FolderRow {
+  id: string
+  name: string
+  createdAt: string
+}
+
 export interface DocumentRow {
   id: string
   title: string
   sourceType: SourceType
   originalFileKey: string
   voiceId: string | null
+  folderId: string | null
   status: DocumentStatus
   errorMessage: string | null
   lastPosition: LastPosition | null

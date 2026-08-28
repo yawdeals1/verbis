@@ -1,12 +1,16 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { deleteDocument, listDocuments } from '../api/client'
-import type { Document } from '../api/types'
-import { PlusIcon, TrashIcon } from '../components/icons'
+import { createFolder, deleteDocument, deleteFolder, listDocuments, listFolders, moveDocumentToFolder, renameFolder } from '../api/client'
+import type { Document, Folder } from '../api/types'
+import { FolderIcon, PlusIcon, TrashIcon } from '../components/icons'
 
 // pdfjs-dist is a large dependency (~600kB) — load it only when a PDF tile
 // actually needs to render a thumbnail, not on every Library visit.
 const PdfThumbnail = lazy(() => import('../components/PdfThumbnail'))
+
+const UNFILED = 'unfiled'
+const ALL = 'all'
+type FolderFilter = typeof ALL | typeof UNFILED | string
 
 function statusLabel(document: Document): string {
   if (document.status === 'processing') return 'Processing'
@@ -32,14 +36,34 @@ function statusClass(document: Document): string {
 
 export default function Library() {
   const [documents, setDocuments] = useState<Document[] | null>(null)
+  const [folders, setFolders] = useState<Folder[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [activeFilter, setActiveFilter] = useState<FolderFilter>(ALL)
+
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [savingFolder, setSavingFolder] = useState(false)
+  const newFolderInputRef = useRef<HTMLInputElement | null>(null)
+
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
 
   useEffect(() => {
     listDocuments()
       .then((res) => setDocuments(res.documents))
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load library'))
+    listFolders()
+      .then((res) => setFolders(res.folders))
+      .catch(() => {
+        // Folder list is secondary to the document grid — a failure here
+        // just means the filter bar shows no folders, not a hard error.
+      })
   }, [])
+
+  useEffect(() => {
+    if (isCreatingFolder) newFolderInputRef.current?.focus()
+  }, [isCreatingFolder])
 
   const handleDelete = async (doc: Document) => {
     if (!window.confirm(`Delete "${doc.title}"? This permanently removes it and its generated audio.`)) return
@@ -54,6 +78,77 @@ export default function Library() {
       setDeletingId(null)
     }
   }
+
+  const handleMove = async (doc: Document, folderId: string | null) => {
+    setDocuments((docs) => docs?.map((d) => (d.id === doc.id ? { ...d, folderId } : d)) ?? docs)
+    try {
+      await moveDocumentToFolder(doc.id, folderId)
+    } catch (err) {
+      setDocuments((docs) => docs?.map((d) => (d.id === doc.id ? { ...d, folderId: doc.folderId } : d)) ?? docs)
+      setError(err instanceof Error ? err.message : 'Failed to move document')
+    }
+  }
+
+  const handleCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const name = newFolderName.trim()
+    if (!name) return
+
+    setSavingFolder(true)
+    try {
+      const { folder } = await createFolder(name)
+      setFolders((current) => [...(current ?? []), folder].sort((a, b) => a.name.localeCompare(b.name)))
+      setActiveFilter(folder.id)
+      setNewFolderName('')
+      setIsCreatingFolder(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create folder')
+    } finally {
+      setSavingFolder(false)
+    }
+  }
+
+  const cancelledRenameRef = useRef(false)
+
+  const commitRenameFolder = async (folder: Folder) => {
+    setRenamingFolderId(null)
+    if (cancelledRenameRef.current) {
+      cancelledRenameRef.current = false
+      return
+    }
+
+    const name = renameValue.trim()
+    if (!name || name === folder.name) return
+
+    try {
+      const { folder: updated } = await renameFolder(folder.id, name)
+      setFolders((current) => current?.map((f) => (f.id === folder.id ? updated : f)).sort((a, b) => a.name.localeCompare(b.name)) ?? current)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename folder')
+    }
+  }
+
+  const handleDeleteFolder = async (folder: Folder) => {
+    if (!window.confirm(`Delete "${folder.name}"? Documents inside stay in your library, unfiled.`)) return
+
+    try {
+      await deleteFolder(folder.id)
+      setFolders((current) => current?.filter((f) => f.id !== folder.id) ?? current)
+      setDocuments((docs) => docs?.map((d) => (d.folderId === folder.id ? { ...d, folderId: null } : d)) ?? docs)
+      setActiveFilter((current) => (current === folder.id ? ALL : current))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete folder')
+    }
+  }
+
+  const filteredDocuments =
+    activeFilter === ALL
+      ? documents
+      : activeFilter === UNFILED
+        ? documents?.filter((d) => d.folderId === null)
+        : documents?.filter((d) => d.folderId === activeFilter)
+
+  const activeFolder = folders?.find((f) => f.id === activeFilter) ?? null
 
   return (
     <section>
@@ -71,6 +166,105 @@ export default function Library() {
           Import
         </Link>
       </div>
+
+      {documents && documents.length > 0 && (
+        <div className="folder-bar" role="tablist" aria-label="Filter by folder">
+          <button type="button" role="tab" aria-selected={activeFilter === ALL} className={`folder-pill${activeFilter === ALL ? ' active' : ''}`} onClick={() => setActiveFilter(ALL)}>
+            All
+          </button>
+          {(folders?.length ?? 0) > 0 && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeFilter === UNFILED}
+              className={`folder-pill${activeFilter === UNFILED ? ' active' : ''}`}
+              onClick={() => setActiveFilter(UNFILED)}
+            >
+              Unfiled
+            </button>
+          )}
+
+          {folders?.map((folder) => {
+            const count = documents.filter((d) => d.folderId === folder.id).length
+            if (renamingFolderId === folder.id) {
+              return (
+                <input
+                  key={folder.id}
+                  className="input folder-rename-input"
+                  value={renameValue}
+                  autoFocus
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => commitRenameFolder(folder)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      cancelledRenameRef.current = true
+                      e.currentTarget.blur()
+                    } else if (e.key === 'Enter') {
+                      e.currentTarget.blur()
+                    }
+                  }}
+                />
+              )
+            }
+            return (
+              <span className="folder-chip" key={folder.id}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeFilter === folder.id}
+                  className={`folder-pill${activeFilter === folder.id ? ' active' : ''}`}
+                  onClick={() => setActiveFilter(folder.id)}
+                  onDoubleClick={() => {
+                    setRenamingFolderId(folder.id)
+                    setRenameValue(folder.name)
+                  }}
+                  title="Double-click to rename"
+                >
+                  <FolderIcon width={13} height={13} />
+                  {folder.name}
+                  <span className="folder-pill-count">{count}</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-icon btn-danger-ghost folder-chip-delete"
+                  onClick={() => handleDeleteFolder(folder)}
+                  aria-label={`Delete folder ${folder.name}`}
+                  title="Delete folder"
+                >
+                  <TrashIcon width={12} height={12} />
+                </button>
+              </span>
+            )
+          })}
+
+          {isCreatingFolder ? (
+            <form className="folder-new-form" onSubmit={handleCreateFolder}>
+              <input
+                ref={newFolderInputRef}
+                className="input folder-new-input"
+                value={newFolderName}
+                placeholder="Folder name"
+                disabled={savingFolder}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setIsCreatingFolder(false)
+                    setNewFolderName('')
+                  }
+                }}
+                onBlur={() => {
+                  if (!newFolderName.trim()) setIsCreatingFolder(false)
+                }}
+              />
+            </form>
+          ) : (
+            <button type="button" className="folder-pill folder-pill-new" onClick={() => setIsCreatingFolder(true)}>
+              <PlusIcon width={13} height={13} />
+              New folder
+            </button>
+          )}
+        </div>
+      )}
 
       {error && (
         <p role="alert" className="error-text" style={{ marginBottom: '1.25rem' }}>
@@ -90,8 +284,14 @@ export default function Library() {
         </div>
       )}
 
+      {documents && documents.length > 0 && filteredDocuments?.length === 0 && (
+        <p className="view-subtitle" style={{ padding: '1.5rem 0' }}>
+          {activeFolder ? `No documents in "${activeFolder.name}" yet — move some here from another folder.` : 'No unfiled documents.'}
+        </p>
+      )}
+
       <ul className="library-grid">
-        {documents?.map((doc) => {
+        {filteredDocuments?.map((doc) => {
           const progress =
             doc.chunksTotal > 0 ? Math.round((doc.chunksReady / doc.chunksTotal) * 100) : doc.status === 'ready' ? 100 : 0
           return (
@@ -129,6 +329,21 @@ export default function Library() {
                   <div className="progress-track">
                     <div className="progress-fill" style={{ width: `${progress}%` }} />
                   </div>
+                )}
+                {folders && folders.length > 0 && (
+                  <select
+                    className="input library-card-folder-select"
+                    value={doc.folderId ?? ''}
+                    aria-label={`Move ${doc.title} to folder`}
+                    onChange={(e) => handleMove(doc, e.target.value || null)}
+                  >
+                    <option value="">No folder</option>
+                    {folders.map((folder) => (
+                      <option key={folder.id} value={folder.id}>
+                        {folder.name}
+                      </option>
+                    ))}
+                  </select>
                 )}
                 <p className="library-card-meta">{new Date(doc.createdAt).toLocaleDateString()}</p>
               </div>

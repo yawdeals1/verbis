@@ -29,12 +29,19 @@ export interface PdfLayout {
   words: PdfWordPosition[]
 }
 
+export interface Folder {
+  id: string
+  name: string
+  createdAt: string
+}
+
 export interface Document {
   id: string
   title: string
   sourceType: SourceType
   originalFileKey: string
   voiceId: string | null
+  folderId: string | null
   status: DocumentStatus
   errorMessage: string | null
   lastPosition: LastPosition | null

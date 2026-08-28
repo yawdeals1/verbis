@@ -529,6 +529,111 @@ textarea.input {
   gap: 0.75rem;
 }
 
+/* ---------- Folders ---------- */
+
+.folder-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.75rem;
+}
+
+.folder-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.folder-pill:hover {
+  border-color: var(--border-strong);
+  color: var(--text-h);
+}
+
+.folder-pill.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  color: var(--accent-strong);
+}
+
+.folder-pill-count {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.folder-pill.active .folder-pill-count {
+  color: inherit;
+}
+
+.folder-pill-new {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.folder-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.folder-chip-delete {
+  position: absolute;
+  right: -0.3rem;
+  top: -0.3rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0.25rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.folder-chip:hover .folder-chip-delete {
+  opacity: 1;
+}
+
+.folder-rename-input,
+.folder-new-input {
+  width: 9rem;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-pill);
+}
+
+.folder-new-form {
+  display: inline-flex;
+}
+
+.library-card-folder-select {
+  margin-top: 0.35rem;
+  width: auto;
+  max-width: 100%;
+  font-size: 0.76rem;
+  padding: 0.3rem 0.55rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-color: transparent;
+}
+
+.library-card-folder-select:hover,
+.library-card-folder-select:focus-visible {
+  color: var(--text-h);
+  border-color: var(--border);
+}
+
 .library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

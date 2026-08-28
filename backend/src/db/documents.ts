@@ -10,6 +10,7 @@ function mapRow(row: Record<string, unknown>): DocumentRow {
     sourceType: row.source_type as SourceType,
     originalFileKey: row.original_file_key as string,
     voiceId: (row.voice_id as string | null) ?? null,
+    folderId: (row.folder_id as string | null) ?? null,
     status: row.status as DocumentStatus,
     errorMessage: (row.error_message as string | null) ?? null,
     lastPosition: (row.last_position as LastPosition | null) ?? null,
@@ -61,6 +62,10 @@ export async function updateLastPosition(id: string, position: LastPosition): Pr
 
 export async function updateSummary(id: string, summary: string): Promise<void> {
   await updateRow(TABLE, id, { summary })
+}
+
+export async function updateDocumentFolder(id: string, folderId: string | null): Promise<void> {
+  await updateRow(TABLE, id, { folder_id: folderId })
 }
 
 export async function updatePageLayout(id: string, pageLayout: DocumentRow['pageLayout']): Promise<void> {

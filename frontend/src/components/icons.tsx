@@ -151,6 +151,14 @@ export function PlusIcon(props: IconProps) {
   )
 }
 
+export function FolderIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h4l2 2.5h7A1.5 1.5 0 0 1 20 9v8.5A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-11z" />
+    </svg>
+  )
+}
+
 export function SparkleIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

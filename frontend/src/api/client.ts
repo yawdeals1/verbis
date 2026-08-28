@@ -1,4 +1,4 @@
-import type { Document, DocumentDetail, Voice } from './types'
+import type { Document, DocumentDetail, Folder, Voice } from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001'
 
@@ -97,6 +97,35 @@ export function updatePosition(documentId: string, chunkSequenceIndex: number, t
 
 export function deleteDocument(documentId: string) {
   return request<void>(`/documents/${documentId}`, { method: 'DELETE' })
+}
+
+export function moveDocumentToFolder(documentId: string, folderId: string | null) {
+  return request<void>(`/documents/${documentId}/folder`, {
+    method: 'PATCH',
+    body: JSON.stringify({ folderId }),
+  })
+}
+
+export function listFolders() {
+  return request<{ folders: Folder[] }>('/folders')
+}
+
+export function createFolder(name: string) {
+  return request<{ folder: Folder }>('/folders', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function renameFolder(folderId: string, name: string) {
+  return request<{ folder: Folder }>(`/folders/${folderId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function deleteFolder(folderId: string) {
+  return request<void>(`/folders/${folderId}`, { method: 'DELETE' })
 }
 
 export function getSummary(documentId: string) {

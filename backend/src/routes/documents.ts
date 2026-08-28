@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from 'express'
 import multer from 'multer'
 import path from 'node:path'
-import { deleteDocument, getDocument, listDocuments, updateLastPosition } from '../db/documents.js'
+import { deleteDocument, getDocument, listDocuments, updateDocumentFolder, updateLastPosition } from '../db/documents.js'
+import { getFolder } from '../db/folders.js'
 import { getChunksForDocument } from '../db/chunks.js'
 import { getVoice } from '../db/voices.js'
 import { deleteObject, getObjectBuffer, putObject } from '../storage/index.js'
@@ -305,6 +306,31 @@ documentsRouter.delete('/:id', async (req, res) => {
   )
 
   await deleteDocument(document.id)
+  res.status(204).send()
+})
+
+documentsRouter.patch('/:id/folder', async (req, res) => {
+  const { folderId } = req.body ?? {}
+  if (folderId !== null && typeof folderId !== 'string') {
+    res.status(400).json({ error: 'folderId must be a string or null' })
+    return
+  }
+
+  const document = await getDocument(req.params.id)
+  if (!document) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  if (folderId !== null) {
+    const folder = await getFolder(folderId)
+    if (!folder) {
+      res.status(404).json({ error: 'Folder not found' })
+      return
+    }
+  }
+
+  await updateDocumentFolder(document.id, folderId)
   res.status(204).send()
 })
 
