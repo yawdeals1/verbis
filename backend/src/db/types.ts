@@ -22,7 +22,6 @@ export interface DocumentRow {
   sourceType: SourceType
   originalFileKey: string
   voiceId: string | null
-  folderId: string | null
   status: DocumentStatus
   errorMessage: string | null
   lastPosition: LastPosition | null

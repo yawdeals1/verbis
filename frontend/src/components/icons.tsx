@@ -159,6 +159,14 @@ export function FolderIcon(props: IconProps) {
   )
 }
 
+export function CheckIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M5 12.5l4.5 4.5L19 7" />
+    </svg>
+  )
+}
+
 export function SparkleIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

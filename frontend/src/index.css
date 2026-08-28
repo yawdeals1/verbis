@@ -617,21 +617,101 @@ textarea.input {
   display: inline-flex;
 }
 
-.library-card-folder-select {
+.folder-picker {
+  position: relative;
   margin-top: 0.35rem;
-  width: auto;
-  max-width: 100%;
-  font-size: 0.76rem;
-  padding: 0.3rem 0.55rem;
-  color: var(--text-muted);
-  background: var(--surface);
-  border-color: transparent;
+  align-self: flex-start;
 }
 
-.library-card-folder-select:hover,
-.library-card-folder-select:focus-visible {
+.folder-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  font: inherit;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.folder-picker-trigger:hover,
+.folder-picker-trigger[aria-expanded='true'] {
   color: var(--text-h);
   border-color: var(--border);
+}
+
+.folder-picker-trigger.has-folders {
+  color: var(--accent-strong);
+}
+
+.folder-picker-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-picker-panel {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 11rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.35rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.folder-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.5rem;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.folder-picker-option:hover {
+  background: var(--surface);
+}
+
+.folder-picker-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--accent-contrast);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.folder-picker-check.checked {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .library-grid {

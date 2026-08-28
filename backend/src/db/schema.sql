@@ -32,15 +32,25 @@ CREATE TABLE IF NOT EXISTS documents (
   source_type TEXT NOT NULL CHECK (source_type IN ('pdf', 'docx', 'txt', 'epub', 'scan', 'url')),
   original_file_key TEXT NOT NULL,
   voice_id UUID REFERENCES voices(id),
-  -- Nullable: a document with no folder is "unfiled". ON DELETE SET NULL so
-  -- removing a folder un-files its documents instead of deleting them.
-  folder_id UUID REFERENCES folders(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing', 'ready', 'error')),
   error_message TEXT,
   last_position JSONB,
   summary TEXT,
   page_layout JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- A document can belong to several folders at once (or none, "unfiled").
+-- ON DELETE CASCADE on both sides so deleting a document or a folder just
+-- drops the association rows, never the document itself. Added by
+-- migrations/add_document_folders.sql, which replaced the earlier
+-- single-folder documents.folder_id column.
+CREATE TABLE IF NOT EXISTS document_folders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  folder_id UUID NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (document_id, folder_id)
 );
 
 CREATE TABLE IF NOT EXISTS chunks (

@@ -1,8 +1,17 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { createFolder, deleteDocument, deleteFolder, listDocuments, listFolders, moveDocumentToFolder, renameFolder } from '../api/client'
+import {
+  addDocumentToFolder,
+  createFolder,
+  deleteDocument,
+  deleteFolder,
+  listDocuments,
+  listFolders,
+  removeDocumentFromFolder,
+  renameFolder,
+} from '../api/client'
 import type { Document, Folder } from '../api/types'
-import { FolderIcon, PlusIcon, TrashIcon } from '../components/icons'
+import { CheckIcon, FolderIcon, PlusIcon, TrashIcon } from '../components/icons'
 
 // pdfjs-dist is a large dependency (~600kB) — load it only when a PDF tile
 // actually needs to render a thumbnail, not on every Library visit.
@@ -79,13 +88,16 @@ export default function Library() {
     }
   }
 
-  const handleMove = async (doc: Document, folderId: string | null) => {
-    setDocuments((docs) => docs?.map((d) => (d.id === doc.id ? { ...d, folderId } : d)) ?? docs)
+  const handleToggleFolder = async (doc: Document, folderId: string) => {
+    const wasInFolder = doc.folderIds.includes(folderId)
+    const nextFolderIds = wasInFolder ? doc.folderIds.filter((id) => id !== folderId) : [...doc.folderIds, folderId]
+    setDocuments((docs) => docs?.map((d) => (d.id === doc.id ? { ...d, folderIds: nextFolderIds } : d)) ?? docs)
     try {
-      await moveDocumentToFolder(doc.id, folderId)
+      if (wasInFolder) await removeDocumentFromFolder(doc.id, folderId)
+      else await addDocumentToFolder(doc.id, folderId)
     } catch (err) {
-      setDocuments((docs) => docs?.map((d) => (d.id === doc.id ? { ...d, folderId: doc.folderId } : d)) ?? docs)
-      setError(err instanceof Error ? err.message : 'Failed to move document')
+      setDocuments((docs) => docs?.map((d) => (d.id === doc.id ? { ...d, folderIds: doc.folderIds } : d)) ?? docs)
+      setError(err instanceof Error ? err.message : 'Failed to update folders')
     }
   }
 
@@ -134,7 +146,9 @@ export default function Library() {
     try {
       await deleteFolder(folder.id)
       setFolders((current) => current?.filter((f) => f.id !== folder.id) ?? current)
-      setDocuments((docs) => docs?.map((d) => (d.folderId === folder.id ? { ...d, folderId: null } : d)) ?? docs)
+      setDocuments(
+        (docs) => docs?.map((d) => (d.folderIds.includes(folder.id) ? { ...d, folderIds: d.folderIds.filter((id) => id !== folder.id) } : d)) ?? docs,
+      )
       setActiveFilter((current) => (current === folder.id ? ALL : current))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete folder')
@@ -145,8 +159,8 @@ export default function Library() {
     activeFilter === ALL
       ? documents
       : activeFilter === UNFILED
-        ? documents?.filter((d) => d.folderId === null)
-        : documents?.filter((d) => d.folderId === activeFilter)
+        ? documents?.filter((d) => d.folderIds.length === 0)
+        : documents?.filter((d) => d.folderIds.includes(activeFilter))
 
   const activeFolder = folders?.find((f) => f.id === activeFilter) ?? null
 
@@ -185,7 +199,7 @@ export default function Library() {
           )}
 
           {folders?.map((folder) => {
-            const count = documents.filter((d) => d.folderId === folder.id).length
+            const count = documents.filter((d) => d.folderIds.includes(folder.id)).length
             if (renamingFolderId === folder.id) {
               return (
                 <input
@@ -331,19 +345,7 @@ export default function Library() {
                   </div>
                 )}
                 {folders && folders.length > 0 && (
-                  <select
-                    className="input library-card-folder-select"
-                    value={doc.folderId ?? ''}
-                    aria-label={`Move ${doc.title} to folder`}
-                    onChange={(e) => handleMove(doc, e.target.value || null)}
-                  >
-                    <option value="">No folder</option>
-                    {folders.map((folder) => (
-                      <option key={folder.id} value={folder.id}>
-                        {folder.name}
-                      </option>
-                    ))}
-                  </select>
+                  <FolderPicker doc={doc} folders={folders} onToggleFolder={(folderId) => handleToggleFolder(doc, folderId)} />
                 )}
                 <p className="library-card-meta">{new Date(doc.createdAt).toLocaleDateString()}</p>
               </div>
@@ -352,5 +354,79 @@ export default function Library() {
         })}
       </ul>
     </section>
+  )
+}
+
+function FolderPicker({
+  doc,
+  folders,
+  onToggleFolder,
+}: {
+  doc: Document
+  folders: Folder[]
+  onToggleFolder: (folderId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+
+    const handlePointerDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open])
+
+  const selectedNames = folders.filter((f) => doc.folderIds.includes(f.id)).map((f) => f.name)
+  const triggerLabel =
+    selectedNames.length === 0 ? 'Add to folder' : selectedNames.length === 1 ? selectedNames[0] : `${selectedNames.length} folders`
+
+  return (
+    <div className="folder-picker" ref={containerRef}>
+      <button
+        type="button"
+        className={`folder-picker-trigger${selectedNames.length > 0 ? ' has-folders' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label={`Add ${doc.title} to a folder`}
+        title="Add to folder"
+      >
+        {selectedNames.length > 0 ? <FolderIcon width={12} height={12} /> : <PlusIcon width={12} height={12} />}
+        <span className="folder-picker-trigger-label">{triggerLabel}</span>
+      </button>
+      {open && (
+        <div className="folder-picker-panel" role="menu" aria-label={`Folders for ${doc.title}`}>
+          {folders.map((folder) => {
+            const checked = doc.folderIds.includes(folder.id)
+            return (
+              <button
+                type="button"
+                key={folder.id}
+                role="menuitemcheckbox"
+                aria-checked={checked}
+                className="folder-picker-option"
+                onClick={() => onToggleFolder(folder.id)}
+              >
+                <span className={`folder-picker-check${checked ? ' checked' : ''}`}>
+                  {checked && <CheckIcon width={11} height={11} />}
+                </span>
+                {folder.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }

@@ -99,11 +99,12 @@ export function deleteDocument(documentId: string) {
   return request<void>(`/documents/${documentId}`, { method: 'DELETE' })
 }
 
-export function moveDocumentToFolder(documentId: string, folderId: string | null) {
-  return request<void>(`/documents/${documentId}/folder`, {
-    method: 'PATCH',
-    body: JSON.stringify({ folderId }),
-  })
+export function addDocumentToFolder(documentId: string, folderId: string) {
+  return request<void>(`/documents/${documentId}/folders/${folderId}`, { method: 'POST' })
+}
+
+export function removeDocumentFromFolder(documentId: string, folderId: string) {
+  return request<void>(`/documents/${documentId}/folders/${folderId}`, { method: 'DELETE' })
 }
 
 export function listFolders() {

@@ -31,7 +31,7 @@ export async function renameFolder(id: string, name: string): Promise<FolderRow>
   return mapRow(row)
 }
 
-/** Deletes the folder row — documents.folder_id is set NULL via the DB's ON DELETE SET NULL FK, so filed documents are un-filed rather than removed. */
+/** Deletes the folder row — document_folders.folder_id cascades via the DB's ON DELETE CASCADE FK, so documents just lose this one association (they may still belong to other folders) rather than being removed. */
 export async function deleteFolder(id: string): Promise<void> {
   await deleteRow(TABLE, id)
 }

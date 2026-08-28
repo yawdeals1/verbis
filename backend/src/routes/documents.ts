@@ -1,8 +1,9 @@
 import { Router, type Request, type Response } from 'express'
 import multer from 'multer'
 import path from 'node:path'
-import { deleteDocument, getDocument, listDocuments, updateDocumentFolder, updateLastPosition } from '../db/documents.js'
+import { deleteDocument, getDocument, listDocuments, updateLastPosition } from '../db/documents.js'
 import { getFolder } from '../db/folders.js'
+import { addDocumentToFolder, listAllDocumentFolders, listFolderIdsForDocument, removeDocumentFromFolder } from '../db/documentFolders.js'
 import { getChunksForDocument } from '../db/chunks.js'
 import { getVoice } from '../db/voices.js'
 import { deleteObject, getObjectBuffer, putObject } from '../storage/index.js'
@@ -87,7 +88,7 @@ documentsRouter.post('/', upload.single('file'), async (req, res) => {
 })
 
 documentsRouter.get('/', async (_req, res) => {
-  const documents = await listDocuments()
+  const [documents, folderMap] = await Promise.all([listDocuments(), listAllDocumentFolders()])
   // N+1, but this is a single-user app with a handful of documents at most —
   // the Studio API has no aggregate/join query, so per-document chunk counts
   // (used to tell "first chunk ready" apart from "fully generated" in the
@@ -97,6 +98,7 @@ documentsRouter.get('/', async (_req, res) => {
       const chunks = await getChunksForDocument(document.id)
       return {
         ...document,
+        folderIds: folderMap.get(document.id) ?? [],
         chunksTotal: chunks.length,
         chunksReady: chunks.filter((c) => c.status === 'ready').length,
       }
@@ -112,14 +114,16 @@ documentsRouter.get('/:id', async (req, res) => {
     return
   }
 
-  const [chunks, voice] = await Promise.all([
+  const [chunks, voice, folderIds] = await Promise.all([
     getChunksForDocument(document.id),
     document.voiceId ? getVoice(document.voiceId) : Promise.resolve(null),
+    listFolderIdsForDocument(document.id),
   ])
 
   res.json({
     document: {
       ...document,
+      folderIds,
       chunksTotal: chunks.length,
       chunksReady: chunks.filter((c) => c.status === 'ready').length,
     },
@@ -309,28 +313,31 @@ documentsRouter.delete('/:id', async (req, res) => {
   res.status(204).send()
 })
 
-documentsRouter.patch('/:id/folder', async (req, res) => {
-  const { folderId } = req.body ?? {}
-  if (folderId !== null && typeof folderId !== 'string') {
-    res.status(400).json({ error: 'folderId must be a string or null' })
-    return
-  }
-
+documentsRouter.post('/:id/folders/:folderId', async (req, res) => {
   const document = await getDocument(req.params.id)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
   }
 
-  if (folderId !== null) {
-    const folder = await getFolder(folderId)
-    if (!folder) {
-      res.status(404).json({ error: 'Folder not found' })
-      return
-    }
+  const folder = await getFolder(req.params.folderId)
+  if (!folder) {
+    res.status(404).json({ error: 'Folder not found' })
+    return
   }
 
-  await updateDocumentFolder(document.id, folderId)
+  await addDocumentToFolder(document.id, folder.id)
+  res.status(204).send()
+})
+
+documentsRouter.delete('/:id/folders/:folderId', async (req, res) => {
+  const document = await getDocument(req.params.id)
+  if (!document) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  await removeDocumentFromFolder(document.id, req.params.folderId)
   res.status(204).send()
 })
 

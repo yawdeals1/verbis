@@ -41,7 +41,7 @@ export interface Document {
   sourceType: SourceType
   originalFileKey: string
   voiceId: string | null
-  folderId: string | null
+  folderIds: string[]
   status: DocumentStatus
   errorMessage: string | null
   lastPosition: LastPosition | null
