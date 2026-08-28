@@ -1,3 +1,5 @@
+import { ForwardIcon, NextSectionIcon, PauseIcon, PlayIcon, PrevSectionIcon, RewindIcon } from './icons'
+
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
 
 interface Props {
@@ -48,36 +50,39 @@ export default function PlaybackBar({
         aria-label="Playback position"
       />
       <div className="playback-bar-time">
-        {formatTime(currentTime)} / {formatTime(duration)}
+        <span>{formatTime(currentTime)}</span>
+        <span>{formatTime(duration)}</span>
       </div>
 
       <div className="playback-bar-controls">
-        <button type="button" onClick={onPrevChunk} disabled={!hasPrevChunk} aria-label="Previous section">
-          ⏮ Section
+        <button type="button" className="btn btn-ghost btn-icon" onClick={onPrevChunk} disabled={!hasPrevChunk} aria-label="Previous section">
+          <PrevSectionIcon />
         </button>
-        <button type="button" onClick={() => onSkip(-10)} aria-label="Rewind 10 seconds">
-          ⏪ 10s
+        <button type="button" className="btn btn-ghost btn-icon" onClick={() => onSkip(-10)} aria-label="Rewind 10 seconds">
+          <RewindIcon />
         </button>
-        <button type="button" onClick={onTogglePlay} aria-label={isPlaying ? 'Pause' : 'Play'}>
-          {isPlaying ? '⏸ Pause' : '▶ Play'}
+        <button type="button" className="playback-bar-play" onClick={onTogglePlay} aria-label={isPlaying ? 'Pause' : 'Play'}>
+          {isPlaying ? <PauseIcon width={20} height={20} /> : <PlayIcon width={20} height={20} />}
         </button>
-        <button type="button" onClick={() => onSkip(10)} aria-label="Skip forward 10 seconds">
-          10s ⏩
+        <button type="button" className="btn btn-ghost btn-icon" onClick={() => onSkip(10)} aria-label="Skip forward 10 seconds">
+          <ForwardIcon />
         </button>
-        <button type="button" onClick={onNextChunk} disabled={!hasNextChunk} aria-label="Next section">
-          Section ⏭
+        <button type="button" className="btn btn-ghost btn-icon" onClick={onNextChunk} disabled={!hasNextChunk} aria-label="Next section">
+          <NextSectionIcon />
         </button>
 
-        <label>
-          Speed
-          <select value={playbackRate} onChange={(e) => onSetPlaybackRate(Number(e.target.value))}>
-            {SPEEDS.map((speed) => (
-              <option key={speed} value={speed}>
-                {speed}x
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="playback-bar-speed">
+          <label className="reader-inline-label">
+            <span className="visually-hidden">Playback speed</span>
+            <select className="input" value={playbackRate} onChange={(e) => onSetPlaybackRate(Number(e.target.value))}>
+              {SPEEDS.map((speed) => (
+                <option key={speed} value={speed}>
+                  {speed}x
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
     </div>
   )

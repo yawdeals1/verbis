@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { askQuestion, getSummary } from '../api/client'
+import { ChevronDownIcon, SparkleIcon } from './icons'
 
 // Phase 4 (optional expansion, PRODUCT_PLAN.md §5): on-demand summary and
 // document-grounded Q&A. Deliberately request-triggered, not automatic —
@@ -44,27 +45,43 @@ export default function DocumentInsights({ documentId }: { documentId: string })
 
   return (
     <details className="document-insights">
-      <summary>Summarize &amp; ask questions</summary>
+      <summary>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+          <SparkleIcon width={15} height={15} style={{ color: 'var(--accent)' }} />
+          Summarize &amp; ask questions
+        </span>
+        <ChevronDownIcon className="chevron" width={16} height={16} />
+      </summary>
 
-      <div>
-        <button type="button" onClick={handleSummarize} disabled={summaryLoading}>
-          {summaryLoading ? 'Summarizing…' : summary ? 'Regenerate summary' : 'Summarize this document'}
-        </button>
-        {summaryError && <p role="alert">{summaryError}</p>}
-        {summary && <p>{summary}</p>}
+      <div className="document-insights-body">
+        <div className="field">
+          <button type="button" className="btn btn-secondary" onClick={handleSummarize} disabled={summaryLoading} style={{ alignSelf: 'flex-start' }}>
+            {summaryLoading ? 'Summarizing…' : summary ? 'Regenerate summary' : 'Summarize this document'}
+          </button>
+          {summaryError && (
+            <p role="alert" className="error-text">
+              {summaryError}
+            </p>
+          )}
+          {summary && <p className="insight-result">{summary}</p>}
+        </div>
+
+        <form onSubmit={handleAsk}>
+          <label className="field">
+            <span className="field-label">Ask a question about this document</span>
+            <input className="input" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="What does this document say about…" />
+          </label>
+          <button type="submit" className="btn btn-secondary" disabled={qaLoading || !question.trim()}>
+            {qaLoading ? 'Thinking…' : 'Ask'}
+          </button>
+        </form>
+        {qaError && (
+          <p role="alert" className="error-text">
+            {qaError}
+          </p>
+        )}
+        {answer && <p className="insight-result">{answer}</p>}
       </div>
-
-      <form onSubmit={handleAsk}>
-        <label>
-          Ask a question about this document
-          <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="What does this document say about…" />
-        </label>
-        <button type="submit" disabled={qaLoading || !question.trim()}>
-          {qaLoading ? 'Thinking…' : 'Ask'}
-        </button>
-        {qaError && <p role="alert">{qaError}</p>}
-        {answer && <p>{answer}</p>}
-      </form>
     </details>
   )
 }

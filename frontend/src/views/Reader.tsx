@@ -41,7 +41,9 @@ export default function Reader() {
   if (loadError) {
     return (
       <section>
-        <p role="alert">Couldn't load this document: {loadError}</p>
+        <p role="alert" className="error-text">
+          Couldn't load this document: {loadError}
+        </p>
       </section>
     )
   }
@@ -49,7 +51,7 @@ export default function Reader() {
   if (!detail) {
     return (
       <section>
-        <p>Loading…</p>
+        <p className="view-subtitle">Loading…</p>
       </section>
     )
   }
@@ -61,74 +63,84 @@ export default function Reader() {
 
   return (
     <section className="reader">
-      <header>
+      <header className="reader-header">
         <h1>{document.title}</h1>
         {chunks.length > 0 && (
           <p className="reader-meta">
-            Chunk {chunkIndex + 1} of {chunks.length}
+            Section {chunkIndex + 1} of {chunks.length}
           </p>
         )}
       </header>
 
-      {document.status === 'error' && <p role="alert">Something went wrong: {document.errorMessage}</p>}
-      {document.status === 'processing' && chunks.length === 0 && <p>Extracting text and preparing your document…</p>}
+      {document.status === 'error' && (
+        <p role="alert" className="reader-status">
+          Something went wrong: {document.errorMessage}
+        </p>
+      )}
+      {document.status === 'processing' && chunks.length === 0 && (
+        <p className="reader-status">Extracting text and preparing your document…</p>
+      )}
       {document.status === 'processing' && chunks.length > 0 && (
-        <p>
+        <p className="reader-status">
           Generating audio… {readyCount} of {chunks.length} sections ready
         </p>
       )}
       {document.status === 'ready' && currentChunk?.status === 'pending' && (
-        <p>
+        <p className="reader-status">
           Generating audio for this section… ({readyCount} of {chunks.length} sections ready)
         </p>
       )}
 
-      <div className="reader-settings">
-        <label>
-          Highlight
-          <select value={granularity} onChange={(e) => setGranularity(e.target.value as typeof granularity)}>
-            <option value="word">Word</option>
-            <option value="sentence">Sentence</option>
-            <option value="off">Off</option>
-          </select>
-        </label>
+      <div className="reader-toolbar">
+        <div className="reader-toolbar-group">
+          <label className="reader-inline-label">
+            Highlight
+            <select className="input" value={granularity} onChange={(e) => setGranularity(e.target.value as typeof granularity)}>
+              <option value="word">Word</option>
+              <option value="sentence">Sentence</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
 
-        {canShowPageView && (
-          <div className="view-toggle" role="group" aria-label="Reader view">
-            <button type="button" className={activeView === 'page' ? 'active' : ''} onClick={() => setView('page')}>
-              Page
-            </button>
-            <button type="button" className={activeView === 'text' ? 'active' : ''} onClick={() => setView('text')}>
-              Text
-            </button>
-          </div>
-        )}
+          {canShowPageView && (
+            <div className="segmented" role="group" aria-label="Reader view">
+              <button type="button" className={activeView === 'page' ? 'active' : ''} onClick={() => setView('page')}>
+                Page
+              </button>
+              <button type="button" className={activeView === 'text' ? 'active' : ''} onClick={() => setView('text')}>
+                Text
+              </button>
+            </div>
+          )}
+        </div>
 
-        {!mergedMode && (
-          <button
-            type="button"
-            className="merge-button"
-            onClick={actions.mergeAudio}
-            disabled={!canMerge || isMerging}
-            title={canMerge ? undefined : 'The first section needs to finish generating first'}
-          >
-            {isMerging ? 'Merging…' : 'Merge all sections'}
-          </button>
-        )}
-        {mergedMode && (
-          <span className="reader-meta">
-            {mergedComplete
-              ? 'Playing as one continuous file'
-              : isBufferingMore
-                ? 'Playing as one continuous file (waiting on the next section…)'
-                : 'Playing as one continuous file (still generating more…)'}
-          </span>
-        )}
+        <div className="reader-toolbar-group">
+          {!mergedMode && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={actions.mergeAudio}
+              disabled={!canMerge || isMerging}
+              title={canMerge ? undefined : 'The first section needs to finish generating first'}
+            >
+              {isMerging ? 'Merging…' : 'Merge all sections'}
+            </button>
+          )}
+          {mergedMode && (
+            <span className="merge-status">
+              {mergedComplete ? 'Playing as one continuous file' : isBufferingMore ? 'Waiting on the next section…' : 'Still generating more…'}
+            </span>
+          )}
+        </div>
       </div>
-      {mergeError && <p role="alert">{mergeError}</p>}
+      {mergeError && (
+        <p role="alert" className="error-text">
+          {mergeError}
+        </p>
+      )}
 
       {activeView === 'page' && document.pageLayout ? (
-        <Suspense fallback={<p>Loading page previews…</p>}>
+        <Suspense fallback={<p className="view-subtitle">Loading page previews…</p>}>
           <PdfPageView
             documentId={document.id}
             pageLayout={document.pageLayout}

@@ -74,7 +74,7 @@ function ReadyChunk({
 
   let globalIndex = 0
   return (
-    <div className={isActive ? 'chunk-block chunk-block-active' : 'chunk-block'}>
+    <div className={`chunk-block ${isActive ? 'chunk-block-active' : 'chunk-block-inactive'}`}>
       {paragraphs.map((paragraph, pIndex) => (
         <p key={pIndex}>
           {paragraph.map((word) => {

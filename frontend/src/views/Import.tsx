@@ -2,8 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { importUrl, listVoices, uploadDocument, uploadScan } from '../api/client'
 import type { Voice } from '../api/types'
+import { CameraIcon, LinkIcon, UploadIcon } from '../components/icons'
 
 type Mode = 'file' | 'scan' | 'url'
+
+const MODES: { id: Mode; label: string }[] = [
+  { id: 'file', label: 'File' },
+  { id: 'scan', label: 'Scan a page' },
+  { id: 'url', label: 'Web page' },
+]
 
 export default function Import() {
   const navigate = useNavigate()
@@ -34,6 +41,11 @@ export default function Import() {
     previewAudioRef.current?.pause()
     setPreviewingVoiceId(null)
   }, [voiceId])
+
+  useEffect(() => {
+    setFile(null)
+    setError(null)
+  }, [mode])
 
   const selectedVoice = voices.find((v) => v.id === voiceId)
 
@@ -82,68 +94,79 @@ export default function Import() {
   }
 
   return (
-    <section>
-      <h1>Import</h1>
-
-      <div role="tablist">
-        <button type="button" aria-pressed={mode === 'file'} onClick={() => setMode('file')}>
-          Upload PDF / DOCX / TXT / EPUB
-        </button>
-        <button type="button" aria-pressed={mode === 'scan'} onClick={() => setMode('scan')}>
-          Scan a book page
-        </button>
-        <button type="button" aria-pressed={mode === 'url'} onClick={() => setMode('url')}>
-          Import from a web page
-        </button>
+    <section className="import-panel">
+      <div>
+        <h1>Import</h1>
+        <p className="view-subtitle">Bring in a document and start listening in a few seconds.</p>
       </div>
 
-      <form onSubmit={handleSubmit}>
+      <div className="segmented" role="tablist" aria-label="Import method">
+        {MODES.map((m) => (
+          <button key={m.id} type="button" role="tab" aria-selected={mode === m.id} className={mode === m.id ? 'active' : ''} onClick={() => setMode(m.id)}>
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      <form className="import-form" onSubmit={handleSubmit}>
         {mode === 'file' && (
-          <label>
-            File
-            <input
-              type="file"
-              accept=".pdf,.docx,.txt,.epub"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
+          <div className="field">
+            <span className="field-label">File</span>
+            <label className="dropzone">
+              <input type="file" accept=".pdf,.docx,.txt,.epub" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              <UploadIcon width={26} height={26} className="dropzone-icon" />
+              <span className="dropzone-title">{file ? 'Change file' : 'Click to choose a file'}</span>
+              <span className="dropzone-hint">PDF, DOCX, TXT, or EPUB</span>
+              {file && <span className="dropzone-filename">{file.name}</span>}
+            </label>
+          </div>
         )}
 
         {mode === 'scan' && (
           <>
-            <label>
-              Photo (camera or upload)
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              />
-            </label>
-            <label>
-              Title (optional)
-              <input value={scanTitle} onChange={(e) => setScanTitle(e.target.value)} placeholder="Scanned page" />
+            <div className="field">
+              <span className="field-label">Photo</span>
+              <label className="dropzone">
+                <input type="file" accept="image/*" capture="environment" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+                <CameraIcon width={26} height={26} className="dropzone-icon" />
+                <span className="dropzone-title">{file ? 'Change photo' : 'Take or upload a photo'}</span>
+                <span className="dropzone-hint">A single page, well lit, held flat</span>
+                {file && <span className="dropzone-filename">{file.name}</span>}
+              </label>
+            </div>
+            <label className="field">
+              <span className="field-label">Title (optional)</span>
+              <input className="input" value={scanTitle} onChange={(e) => setScanTitle(e.target.value)} placeholder="Scanned page" />
             </label>
           </>
         )}
 
         {mode === 'url' && (
-          <label>
-            Page URL
-            <input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.com/article"
-            />
+          <label className="field">
+            <span className="field-label">Page URL</span>
+            <div style={{ position: 'relative' }}>
+              <LinkIcon
+                width={15}
+                height={15}
+                style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+              />
+              <input
+                className="input"
+                style={{ paddingLeft: '2.1rem' }}
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://example.com/article"
+              />
+            </div>
           </label>
         )}
 
         {voices.length > 0 && (
           <div className="voice-picker">
-            <label>
-              Voice
-              <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+            <label className="field">
+              <span className="field-label">Voice</span>
+              <select className="input" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
                 {voices.map((voice) => (
                   <option key={voice.id} value={voice.id}>
                     {voice.displayName}
@@ -152,21 +175,21 @@ export default function Import() {
               </select>
             </label>
             {selectedVoice?.previewAudioUrl && (
-              <button type="button" onClick={togglePreview}>
-                {previewingVoiceId === selectedVoice.id ? 'Stop preview' : 'Preview voice'}
+              <button type="button" className="btn btn-secondary" onClick={togglePreview}>
+                {previewingVoiceId === selectedVoice.id ? 'Stop' : 'Preview'}
               </button>
             )}
-            <audio
-              ref={previewAudioRef}
-              onEnded={() => setPreviewingVoiceId(null)}
-              style={{ display: 'none' }}
-            />
+            <audio ref={previewAudioRef} onEnded={() => setPreviewingVoiceId(null)} style={{ display: 'none' }} />
           </div>
         )}
 
-        {error && <p role="alert">{error}</p>}
+        {error && (
+          <p role="alert" className="error-text">
+            {error}
+          </p>
+        )}
 
-        <button type="submit" disabled={isSubmitting || (mode === 'url' ? !url.trim() : !file)}>
+        <button type="submit" className="btn btn-primary btn-block" disabled={isSubmitting || (mode === 'url' ? !url.trim() : !file)}>
           {isSubmitting ? 'Processing…' : 'Import and start listening'}
         </button>
       </form>
