@@ -15,6 +15,53 @@ const RETRY_BASE_DELAY_MS = 5_000
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
+ * Caps how many chunks are being synthesized against the TTS API at once,
+ * across every document — not per document. Each upload runs its own
+ * generation loop (documentPipeline.ts) with no knowledge of any other, so
+ * importing several documents back to back used to fire all of their chunks
+ * at Speechify concurrently. That self-inflicted burst tripped rate limits
+ * for long enough that chunks exhausted their retry budget (3 attempts,
+ * ~15s of backoff) before the throttling let up, leaving them permanently
+ * `error` even though the text and voice were fine. Gating the actual
+ * network call here — the one thing every generation loop shares — keeps
+ * the API load flat regardless of how many documents are importing at once.
+ *
+ * Confirmed against a live 429: `{"code":"concurrency_limit_reached",
+ * "message":"...your plan allows 1 simultaneous requests..."}` — the
+ * Speechify plan in use caps concurrency at exactly 1, so this can't be
+ * raised without a plan change.
+ */
+class Semaphore {
+  private available: number
+  private readonly queue: (() => void)[] = []
+
+  constructor(count: number) {
+    this.available = count
+  }
+
+  async acquire(): Promise<() => void> {
+    if (this.available > 0) {
+      this.available--
+      return () => this.release()
+    }
+    return new Promise((resolve) => {
+      this.queue.push(() => {
+        this.available--
+        resolve(() => this.release())
+      })
+    })
+  }
+
+  private release(): void {
+    this.available++
+    this.queue.shift()?.()
+  }
+}
+
+const TTS_CONCURRENCY = 1
+const ttsSemaphore = new Semaphore(TTS_CONCURRENCY)
+
+/**
  * Retries a chunk whose synthesis failed.
  *
  * Both backends are metered hosted APIs, so the failures worth retrying are
@@ -24,17 +71,22 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  * inside the same window.
  */
 async function synthesizeWithRetry(text: string, voiceProviderVoiceId: string) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await synthesizeChunk(text, voiceProviderVoiceId)
-    } catch (err) {
-      if (attempt >= MAX_SYNTHESIS_ATTEMPTS) throw err
-      console.warn(
-        `[tts] synthesis attempt ${attempt}/${MAX_SYNTHESIS_ATTEMPTS} failed, retrying:`,
-        err instanceof Error ? err.message : err,
-      )
-      await sleep(RETRY_BASE_DELAY_MS * attempt)
+  const release = await ttsSemaphore.acquire()
+  try {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await synthesizeChunk(text, voiceProviderVoiceId)
+      } catch (err) {
+        if (attempt >= MAX_SYNTHESIS_ATTEMPTS) throw err
+        console.warn(
+          `[tts] synthesis attempt ${attempt}/${MAX_SYNTHESIS_ATTEMPTS} failed, retrying:`,
+          err instanceof Error ? err.message : err,
+        )
+        await sleep(RETRY_BASE_DELAY_MS * attempt)
+      }
     }
+  } finally {
+    release()
   }
 }
 

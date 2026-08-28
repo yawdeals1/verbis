@@ -94,8 +94,16 @@ export function useReaderPlayback(documentId: string | undefined) {
         setDetail(data)
         if (!hasAppliedResumeRef.current && data.document.lastPosition) {
           hasAppliedResumeRef.current = true
-          setChunkIndex(data.document.lastPosition.chunkSequenceIndex)
-          pendingSeekSecondsRef.current = data.document.lastPosition.timeSeconds
+          const savedIndex = data.document.lastPosition.chunkSequenceIndex
+          // The saved chunk may have since been marked `error` (or already was) —
+          // landing on it directly would leave playback stalled with no src ever
+          // set, so fall forward to the next playable chunk same as opening cold.
+          const resumeIndex =
+            data.chunks[savedIndex]?.status === 'error' ? playableIndexFrom(data.chunks, savedIndex, 1) : savedIndex
+          if (resumeIndex !== null) {
+            if (resumeIndex === savedIndex) pendingSeekSecondsRef.current = data.document.lastPosition.timeSeconds
+            setChunkIndex(resumeIndex)
+          }
           return
         }
         // Front matter is the most likely chunk to have failed synthesis, so
@@ -220,8 +228,20 @@ export function useReaderPlayback(documentId: string | undefined) {
     [detail, mergedMode, chunkOffsetsMs],
   )
 
-  const goToNextChunk = useCallback(() => goToChunk(chunkIndex + 1), [goToChunk, chunkIndex])
-  const goToPrevChunk = useCallback(() => goToChunk(chunkIndex - 1), [goToChunk, chunkIndex])
+  // Skip over `error` chunks same as handleEnded does — jumping straight to
+  // chunkIndex +/- 1 could land on one, and since nothing sets an audio src
+  // for a non-`ready` chunk, that's a silent dead stop rather than a skip.
+  const goToNextChunk = useCallback(() => {
+    if (!detail) return
+    const next = playableIndexFrom(detail.chunks, chunkIndex + 1, 1)
+    if (next !== null) goToChunk(next)
+  }, [detail, chunkIndex, goToChunk, playableIndexFrom])
+
+  const goToPrevChunk = useCallback(() => {
+    if (!detail) return
+    const prev = playableIndexFrom(detail.chunks, chunkIndex - 1, -1)
+    if (prev !== null) goToChunk(prev)
+  }, [detail, chunkIndex, goToChunk, playableIndexFrom])
 
   const handleEnded = useCallback(() => {
     if (!detail) return
