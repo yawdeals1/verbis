@@ -79,6 +79,15 @@ export async function validateSession(token: string): Promise<DeploroAuthUser | 
   return mapUser(body.user)
 }
 
+// NOTE: verified live (repeatedly, across unconfirmed/confirmed/logged-in
+// identities, and with the `email` OTP provider both on and off) that
+// Deploro never actually delivers a reset email for this project, despite
+// always returning {"ok":true}. Kept as a correct implementation of
+// Deploro's documented contract, but the invite flow (routes/auth.ts's
+// `/accept-invite`) deliberately does NOT depend on this working, since it
+// currently doesn't. Worth revisiting if Deploro fixes it, or ask their
+// support — nothing on the Verbis side can route around a provider-side
+// email delivery gap for this endpoint specifically.
 export async function requestPasswordReset(email: string): Promise<void> {
   await fetch(authUrl('/email-password/request-reset'), {
     method: 'POST',
@@ -102,16 +111,17 @@ export async function resetPassword(token: string, password: string): Promise<vo
 }
 
 /**
- * Self-service signup against Deploro's email+password provider — used by
- * the "accept your invite" flow. This is deliberately NOT the admin-add
- * endpoint: verified live against the deployed worker that admin-added end
- * users only get a passwordless `email` (OTP) identity, and that the
- * invitee still has to run this same signup call themselves to attach a
- * password credential before `/login` will accept one — so admin-add would
- * just be a redundant extra confirmation email with no functional benefit.
- * Deploro end users are unique per (project, email), so this reuses the
- * same underlying identity if one already exists (e.g. from OAuth).
- * Always `{ok:true}`; Deploro emails a confirmation link regardless.
+ * Self-service signup against Deploro's email+password provider — the ONLY
+ * reliable way (verified live, many times) to get someone from "invited" to
+ * "can actually log in": the password given here is permanent from the
+ * user's perspective, since there is no working way to change it
+ * afterwards (see requestPasswordReset above) — re-calling signup on an
+ * already-confirmed identity is a silent no-op, it does not update the
+ * password. So this must always be called with the password the invitee
+ * themselves chose, via routes/auth.ts's `/accept-invite`, never a
+ * throwaway. Re-calling it on a still-*unconfirmed* identity IS safe and
+ * resends a fresh confirmation email (verified live) — that's what makes
+ * accept-invite idempotent if someone submits the form twice.
  */
 export async function signup(email: string, password: string, name: string): Promise<void> {
   const response = await fetch(authUrl('/email-password/signup'), {
@@ -122,5 +132,65 @@ export async function signup(email: string, password: string, name: string): Pro
   if (!response.ok) {
     const body = await response.json().catch(() => ({}) as { error?: string })
     throw new DeploroAuthError(response.status, body.error ?? 'Signup failed')
+  }
+}
+
+function adminAuthUrl(path: string): string {
+  return `${env.deploroApiUrl.replace(/\/studio$/, '')}/auth${path}`
+}
+
+function adminAuthHeaders(): Record<string, string> {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${env.deploroApiToken}` }
+}
+
+/**
+ * Admin-only: creates a passwordless `email` (OTP) identity purely to
+ * trigger Deploro's "Confirm your account" email as the invite
+ * notification (`POST /api/projects/:id/auth/users`, project-admin PAT,
+ * not an end-user session). This identity is never used for sign-in —
+ * Verbis only supports email+password, and clicking this email's link only
+ * confirms the harmless OTP identity, never touching any password — it
+ * exists solely to get one real email into the invitee's inbox pointing
+ * them at `/welcome`, where they choose their password themselves (see
+ * routes/auth.ts's `/accept-invite`, which calls `signup` above for the
+ * credential that actually matters).
+ *
+ * This is NOT how the invite email used to be sent — an earlier version
+ * called `signup` with a random throwaway password instead. That was a
+ * real bug: clicking "Confirm your account" finalizes whatever password
+ * was in the signup call, permanently (re-signup on a confirmed identity
+ * is a silent no-op — see `signup` above), and `requestPasswordReset`
+ * doesn't work (verified live, extensively) — so a throwaway password
+ * meant the invitee could get permanently locked out with no recovery.
+ * admin-add can't lock anyone out this way, since it never sets a password
+ * at all.
+ *
+ * 409s if an end user already exists for this email — that's expected on
+ * every resend (see `sendInviteEmail` in routes/admin.ts, which deletes
+ * the existing one first): admin-add has no separate "resend" mode.
+ */
+export async function addEndUser(email: string, name: string): Promise<{ alreadyInvited: boolean }> {
+  const response = await fetch(adminAuthUrl('/users'), { method: 'POST', headers: adminAuthHeaders(), body: JSON.stringify({ email, name }) })
+  if (response.status === 409) return { alreadyInvited: true }
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(`Deploro end-user creation failed (${response.status}): ${body}`)
+  }
+  return { alreadyInvited: false }
+}
+
+export async function findEndUserByEmail(email: string): Promise<{ id: string } | null> {
+  const response = await fetch(`${adminAuthUrl('/users')}?limit=1000`, { headers: adminAuthHeaders() })
+  if (!response.ok) throw new Error(`Failed to list Deploro end users (${response.status})`)
+  const body = (await response.json()) as { users: { id: string; email: string }[] }
+  const match = body.users.find((u) => u.email.toLowerCase() === email.toLowerCase())
+  return match ? { id: match.id } : null
+}
+
+export async function deleteEndUser(id: string): Promise<void> {
+  const response = await fetch(adminAuthUrl(`/users/${id}`), { method: 'DELETE', headers: adminAuthHeaders() })
+  if (!response.ok && response.status !== 404) {
+    const body = await response.text().catch(() => '')
+    throw new Error(`Failed to delete Deploro end user (${response.status}): ${body}`)
   }
 }

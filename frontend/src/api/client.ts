@@ -171,6 +171,10 @@ export function getMe() {
   return request<{ user: CurrentUser }>('/auth/me')
 }
 
+export function acceptInvite(email: string, password: string) {
+  return request<{ ok: true }>('/auth/accept-invite', { method: 'POST', body: JSON.stringify({ email, password }) })
+}
+
 export function forgotPassword(email: string) {
   return request<{ ok: true }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) })
 }

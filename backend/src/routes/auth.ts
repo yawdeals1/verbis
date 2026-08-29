@@ -59,6 +59,53 @@ authRouter.get('/me', requireAuth, (req, res) => {
   res.json({ user: publicUser(req.user!) })
 })
 
+// Reached from the /welcome page after clicking the admin-add notification
+// email (see lib/deploroAuth.ts's addEndUser). The invitee's own chosen
+// password goes straight into `signup` here — this is the only place a
+// real password credential ever gets attached, deliberately never a
+// throwaway one (see signup's doc comment for the incident that taught us
+// why). Gated on a matching row already existing in Verbis's own `users`
+// table (created only by an admin invite), not open signup.
+authRouter.post('/accept-invite', async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim() : ''
+  const password = typeof req.body?.password === 'string' ? req.body.password : ''
+  if (!email || !password) {
+    res.status(400).json({ error: 'email and password are required' })
+    return
+  }
+  if (password.length < 8) {
+    res.status(400).json({ error: 'Password must be at least 8 characters' })
+    return
+  }
+
+  const user = await getUserByEmail(email)
+  if (!user) {
+    res.status(400).json({ error: "This email hasn't been invited to Verbis." })
+    return
+  }
+  if (user.deploroUserId) {
+    res.status(400).json({ error: 'This account is already set up — log in instead.' })
+    return
+  }
+
+  try {
+    await deploroAuth.signup(email, password, user.username)
+  } catch (err) {
+    if (err instanceof deploroAuth.DeploroAuthError) {
+      res.status(400).json({ error: err.message })
+      return
+    }
+    throw err
+  }
+
+  res.json({ ok: true })
+})
+
+// NOTE: verified live that Deploro doesn't actually deliver a reset email
+// for this project (see lib/deploroAuth.ts's requestPasswordReset) — kept
+// as a correct client of Deploro's documented contract in case that gets
+// fixed platform-side, but don't build anything new that depends on it
+// working right now.
 authRouter.post('/forgot-password', async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim() : ''
   if (email) await deploroAuth.requestPasswordReset(email)

@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { Router } from 'express'
 import { createUser, getUserByEmail, getUserById, getUserByUsername, listUsers } from '../db/users.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
@@ -15,29 +14,25 @@ function publicUser(u: UserRow) {
   return { id: u.id, username: u.username, email: u.email, role: u.role, createdAt: u.createdAt, pending: u.deploroUserId === null }
 }
 
-// Never shown to anyone, never stored — Deploro's email+password provider
-// requires *some* password to create the identity, but the invitee always
-// sets their own via "Forgot password" after clicking the confirmation
-// email this triggers (see sendInviteEmail below for why that's the right
-// primitive rather than a custom "set password" link, which Deploro's API
-// has no way to generate).
-function throwawayPassword(): string {
-  return `${randomBytes(24).toString('base64url')}Aa1!`
-}
-
 /**
- * Triggers Deploro's own "Confirm your account" email by creating (or
- * re-creating, for a resend) the invitee's email+password identity with a
- * throwaway password. Once they click the confirmation link, their
- * identity is verified and "Forgot password" on the login page lets them
- * set a real one — verified live that re-calling signup on an unconfirmed
- * identity is safe (200 ok, fresh email) rather than erroring, which is
- * what makes this reusable for resends.
+ * Triggers Deploro's own "Confirm your account" email via admin-add
+ * (`deploroAuth.addEndUser` — see its doc comment for why this, not
+ * `signup`, is what's safe to send here). admin-add 409s if an end user
+ * already exists for this email, which is the normal case on every resend
+ * — since it's a passwordless notification-only identity nothing of value
+ * is lost by deleting and recreating it to force a fresh email, and this
+ * function is only ever called for a user who hasn't finished real setup
+ * yet (`deploroUserId` still null — enforced by the caller).
  */
 async function sendInviteEmail(email: string, username: string): Promise<boolean> {
   try {
-    await deploroAuth.signup(email, throwawayPassword(), username)
-    return true
+    const result = await deploroAuth.addEndUser(email, username)
+    if (!result.alreadyInvited) return true
+
+    const existing = await deploroAuth.findEndUserByEmail(email)
+    if (existing) await deploroAuth.deleteEndUser(existing.id)
+    const retry = await deploroAuth.addEndUser(email, username)
+    return !retry.alreadyInvited
   } catch (err) {
     console.error(`Failed to send invite email to ${email}:`, err)
     return false
