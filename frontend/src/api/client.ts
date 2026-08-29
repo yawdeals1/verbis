@@ -171,10 +171,6 @@ export function getMe() {
   return request<{ user: CurrentUser }>('/auth/me')
 }
 
-export function acceptInvite(email: string, password: string) {
-  return request<{ ok: true }>('/auth/accept-invite', { method: 'POST', body: JSON.stringify({ email, password }) })
-}
-
 export function forgotPassword(email: string) {
   return request<{ ok: true }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) })
 }
@@ -188,10 +184,14 @@ export function adminListUsers() {
 }
 
 export function adminInvite(email: string, username: string, role: 'member' | 'contributor') {
-  return request<{ user: AdminUser }>('/admin/invite', {
+  return request<{ user: AdminUser; emailSent: boolean }>('/admin/invite', {
     method: 'POST',
     body: JSON.stringify({ email, username, role }),
   })
+}
+
+export function adminResendInvite(userId: string) {
+  return request<{ ok: true }>(`/admin/users/${userId}/resend-invite`, { method: 'POST' })
 }
 
 export function listDocumentShares(documentId: string) {

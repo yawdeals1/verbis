@@ -68,8 +68,7 @@ export default function Login() {
           {isSubmitting ? 'Signing in…' : 'Sign in'}
         </button>
 
-        <div className="field-hint" style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Link to="/accept-invite">Been invited? Set your password</Link>
+        <div className="field-hint" style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Link to="/forgot-password">Forgot password?</Link>
         </div>
       </form>

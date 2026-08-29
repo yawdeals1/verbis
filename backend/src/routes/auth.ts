@@ -59,45 +59,6 @@ authRouter.get('/me', requireAuth, (req, res) => {
   res.json({ user: publicUser(req.user!) })
 })
 
-// Invite acceptance: the invitee chooses their own password here — this is
-// the only place a Deploro identity gets a real password credential
-// attached. Gated on a matching row already existing in Verbis's own
-// `users` table (created only by an admin invite), not open signup.
-authRouter.post('/accept-invite', async (req, res) => {
-  const email = typeof req.body?.email === 'string' ? req.body.email.trim() : ''
-  const password = typeof req.body?.password === 'string' ? req.body.password : ''
-  if (!email || !password) {
-    res.status(400).json({ error: 'email and password are required' })
-    return
-  }
-  if (password.length < 8) {
-    res.status(400).json({ error: 'Password must be at least 8 characters' })
-    return
-  }
-
-  const user = await getUserByEmail(email)
-  if (!user) {
-    res.status(400).json({ error: "This email hasn't been invited to Verbis." })
-    return
-  }
-  if (user.deploroUserId) {
-    res.status(400).json({ error: 'This account is already set up — log in instead.' })
-    return
-  }
-
-  try {
-    await deploroAuth.signup(email, password, user.username)
-  } catch (err) {
-    if (err instanceof deploroAuth.DeploroAuthError) {
-      res.status(400).json({ error: err.message })
-      return
-    }
-    throw err
-  }
-
-  res.json({ ok: true })
-})
-
 authRouter.post('/forgot-password', async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim() : ''
   if (email) await deploroAuth.requestPasswordReset(email)

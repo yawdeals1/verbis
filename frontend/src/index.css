@@ -1288,7 +1288,7 @@ textarea.input {
 
 .users-table-row {
   display: grid;
-  grid-template-columns: 1fr 1.6fr auto;
+  grid-template-columns: 1fr 1.6fr auto auto;
   align-items: center;
   gap: 1rem;
   padding: 0.7rem 1rem;

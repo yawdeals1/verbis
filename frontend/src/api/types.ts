@@ -16,6 +16,8 @@ export interface AdminUser {
   email: string
   role: UserRole
   createdAt: string
+  /** True until this user has completed signup and logged in at least once. */
+  pending: boolean
 }
 
 export interface LastPosition {

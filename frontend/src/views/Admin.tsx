@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
-import { adminInvite, adminListUsers } from '../api/client'
+import { adminInvite, adminListUsers, adminResendInvite } from '../api/client'
 import type { AdminUser, UserRole } from '../api/types'
 import { PlusIcon } from '../components/icons'
 
 export default function Admin() {
   const [users, setUsers] = useState<AdminUser[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [resendingId, setResendingId] = useState<string | null>(null)
 
   const [email, setEmail] = useState('')
   const [username, setUsername] = useState('')
@@ -26,9 +28,11 @@ export default function Admin() {
     e.preventDefault()
     setIsSubmitting(true)
     setFormError(null)
+    setNotice(null)
     try {
-      const { user } = await adminInvite(email.trim(), username.trim(), role)
+      const { user, emailSent } = await adminInvite(email.trim(), username.trim(), role)
       setUsers((current) => [...(current ?? []), user].sort((a, b) => a.username.localeCompare(b.username)))
+      setNotice(emailSent ? `Invite email sent to ${user.email}.` : `${user.username} was invited, but the email failed to send — use "Resend" below.`)
       setEmail('')
       setUsername('')
       setRole('member')
@@ -36,6 +40,20 @@ export default function Admin() {
       setFormError(err instanceof Error ? err.message : 'Failed to invite')
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  const handleResend = async (user: AdminUser) => {
+    setResendingId(user.id)
+    setError(null)
+    setNotice(null)
+    try {
+      await adminResendInvite(user.id)
+      setNotice(`Invite email resent to ${user.email}.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resend invite')
+    } finally {
+      setResendingId(null)
     }
   }
 
@@ -78,6 +96,7 @@ export default function Admin() {
         </button>
       </form>
 
+      {notice && <p className="field-hint" style={{ marginBottom: '1rem' }}>{notice}</p>}
       {error && (
         <p role="alert" className="error-text">
           {error}
@@ -90,12 +109,25 @@ export default function Admin() {
             <span>Username</span>
             <span>Email</span>
             <span>Role</span>
+            <span>Status</span>
           </div>
           {users.map((u) => (
             <div className="users-table-row" key={u.id}>
               <span>{u.username}</span>
               <span className="view-subtitle">{u.email}</span>
               <span className={`badge ${u.role === 'admin' ? 'badge-ready' : 'badge-processing'}`}>{u.role}</span>
+              {u.pending ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleResend(u)}
+                  disabled={resendingId === u.id}
+                >
+                  {resendingId === u.id ? 'Sending…' : 'Resend invite'}
+                </button>
+              ) : (
+                <span className="badge badge-ready">Active</span>
+              )}
             </div>
           ))}
         </div>
