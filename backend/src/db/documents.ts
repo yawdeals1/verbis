@@ -10,6 +10,7 @@ function mapRow(row: Record<string, unknown>): DocumentRow {
     sourceType: row.source_type as SourceType,
     originalFileKey: row.original_file_key as string,
     voiceId: (row.voice_id as string | null) ?? null,
+    ownerId: row.owner_id as string,
     status: row.status as DocumentStatus,
     errorMessage: (row.error_message as string | null) ?? null,
     lastPosition: (row.last_position as LastPosition | null) ?? null,
@@ -24,6 +25,7 @@ export async function createDocument(input: {
   sourceType: SourceType
   originalFileKey: string
   voiceId: string
+  ownerId: string
   pageLayout?: DocumentRow['pageLayout']
 }): Promise<DocumentRow> {
   const row = await insertRow<Record<string, unknown>>(TABLE, {
@@ -31,6 +33,7 @@ export async function createDocument(input: {
     source_type: input.sourceType,
     original_file_key: input.originalFileKey,
     voice_id: input.voiceId,
+    owner_id: input.ownerId,
     status: 'processing',
     page_layout: input.pageLayout ?? null,
   })
@@ -42,8 +45,8 @@ export async function getDocument(id: string): Promise<DocumentRow | null> {
   return row ? mapRow(row) : null
 }
 
-export async function listDocuments(): Promise<DocumentRow[]> {
-  const rows = await listRows<Record<string, unknown>>(TABLE)
+export async function listDocumentsByOwner(ownerId: string): Promise<DocumentRow[]> {
+  const rows = await listRows<Record<string, unknown>>(TABLE, { filter: { owner_id: ownerId } })
   return rows.map(mapRow).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 

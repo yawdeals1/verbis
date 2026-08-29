@@ -2,6 +2,7 @@ import { Router } from 'express'
 import multer from 'multer'
 import { extractTextFromImage } from '../services/ocr.js'
 import { ingestDocument, NoTextExtractedError } from '../services/documentPipeline.js'
+import { requireRole } from '../middleware/auth.js'
 
 export const scanRouter = Router()
 
@@ -10,7 +11,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 // Camera capture or photo upload of a physical book page (PRODUCT_PLAN.md
 // Phase 2). Reuses the same chunk/TTS pipeline as file imports — OCR is
 // just another text-extraction path feeding the same downstream flow.
-scanRouter.post('/', upload.single('file'), async (req, res) => {
+scanRouter.post('/', requireRole('admin', 'contributor'), upload.single('file'), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: 'Missing file' })
     return
@@ -26,6 +27,7 @@ scanRouter.post('/', upload.single('file'), async (req, res) => {
       fileBuffer: req.file.buffer,
       fileContentType: req.file.mimetype || 'image/jpeg',
       extractedText,
+      ownerId: req.user!.id,
       voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
     })
 

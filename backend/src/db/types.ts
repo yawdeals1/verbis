@@ -4,15 +4,35 @@ import type { PdfLayout } from '../services/pdfLayout.js'
 export type SourceType = 'pdf' | 'docx' | 'txt' | 'epub' | 'scan' | 'url'
 export type DocumentStatus = 'processing' | 'ready' | 'error'
 export type ChunkStatus = 'pending' | 'ready' | 'error'
+export type UserRole = 'admin' | 'member' | 'contributor'
 
 export interface LastPosition {
   chunkSequenceIndex: number
   timeSeconds: number
 }
 
+export interface UserRow {
+  id: string
+  /** Backfilled on first successful login — null until the invitee actually completes signup (see routes/auth.ts). */
+  deploroUserId: string | null
+  username: string
+  email: string
+  role: UserRole
+  createdAt: string
+}
+
+export interface DocumentShareRow {
+  id: string
+  documentId: string
+  sharedByUserId: string
+  sharedWithUserId: string
+  createdAt: string
+}
+
 export interface FolderRow {
   id: string
   name: string
+  ownerId: string
   createdAt: string
 }
 
@@ -22,6 +42,7 @@ export interface DocumentRow {
   sourceType: SourceType
   originalFileKey: string
   voiceId: string | null
+  ownerId: string
   status: DocumentStatus
   errorMessage: string | null
   lastPosition: LastPosition | null

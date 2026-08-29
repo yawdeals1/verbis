@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository. See `verbis-prd.md` fo
 
 ## What Verbis Is
 
-A personal read-aloud app: import a PDF/DOCX or a photo of a book page, get it read aloud with the current word highlighted in sync, and tap any word to jump playback there. Single user, no auth, no multi-tenant concerns. Optimize for a tight, fast, single-purpose reader — resist adding features from the PRD's explicit non-goals list (voice cloning, podcast generation, dictation, meeting notes, multi-user accounts) unless the user asks.
+A personal read-aloud app: import a PDF/DOCX or a photo of a book page, get it read aloud with the current word highlighted in sync, and tap any word to jump playback there. Invite-only, three roles (`admin`/`contributor`/`member`), each user's library private by default with explicit per-document sharing by username — see "Auth & Access Model" below. Optimize for a tight, fast, single-purpose reader — resist adding features from the PRD's explicit non-goals list (voice cloning, podcast generation, dictation, meeting notes) unless the user asks.
 
 ## Stack
 
@@ -15,8 +15,19 @@ A personal read-aloud app: import a PDF/DOCX or a photo of a book page, get it r
 - **TTS**: Speechify (`POST /v1/audio/speech`, default) or ElevenLabs (`/v1/text-to-speech/{voice_id}/with-timestamps`), selected by `TTS_PROVIDER`. Both return the same character-anchored word timings, so previously generated audio stays valid across a switch.
 - **OCR**: Google Cloud Vision, Document Text Detection mode.
 - **Summarization/Q&A (Phase 4)**: local Ollama model (default `gemma4`, configurable via `OLLAMA_MODEL`) — no API key, no per-token billing.
+- **Auth**: Deploro Auth-as-a-Service (`email_password` provider on the `verbis` project), proxied server-to-server — see below.
 
 No other providers should be introduced for these roles without discussing it first — each was chosen deliberately (see `PRODUCT_PLAN.md` §2) and swapping one has knock-on effects (e.g. both TTS backends must keep returning character-anchored word timing, since the highlighting feature depends on it).
+
+## Auth & Access Model
+
+Verbis uses Deploro Auth-as-a-Service for identity, but Deploro has no closed-signup toggle — invite-only is enforced entirely by Verbis's own `users` table (`backend/src/db/users.ts`), not by Deploro. A stranger can still complete a raw signup directly against the Deploro worker; without a matching row in `users` every Verbis route 403s them anyway (`middleware/auth.ts`'s `requireAuth`). Only the admin-invite endpoint (`POST /admin/invite`, admin-only) ever inserts into `users`.
+
+The Deploro session cookie (`gallium_project_session_<slug>`) is scoped to the Deploro worker's own domain, not Verbis's — so sessions are backend-mediated, not browser-direct: `POST /auth/login` calls Deploro server-to-server and re-issues its own `verbis_session` cookie on Verbis's domain; every protected route validates that cookie by calling Deploro's `GET /auth/:slug/session` server-to-server (`lib/deploroAuth.ts`). Never call the Deploro worker's `/auth/:slug/*` endpoints directly from the frontend — always go through Verbis's own `/auth/*` routes.
+
+An invited user has an app-level `users` row (`username`, `email`, `role`) before they have any Deploro credential — `deploro_user_id` is null until they actually complete `POST /auth/accept-invite` (self-service against Deploro's `email_password/signup`, their own chosen password) and log in for the first time. Don't "pre-provision" a Deploro identity at invite time (`deploro auth end-users add`/`POST /api/projects/:id/auth/users`) — verified live that it only attaches a passwordless OTP identity, so the invitee would still have to run signup themselves anyway, just with a redundant extra confirmation email.
+
+Three roles: `admin` (full access + can invite), `contributor` (can upload their own documents), `member` (read-only — can only consume documents shared with them). Every document/folder has exactly one `owner_id`; there is no shared "everyone's library." `document_shares` grants one other user read-only access to one document (+ its audio) by username — sharing is owner-only, and shared access never includes delete/folder-assignment/further-sharing regardless of the recipient's own role.
 
 ## Architectural Rules
 
@@ -30,7 +41,7 @@ No other providers should be introduced for these roles without discussing it fi
 
 ## Data Model
 
-See `PRODUCT_PLAN.md` §4 for the full `documents` / `chunks` / `voices` / `reading_sessions` schema. Keep schema changes reflected in that doc.
+See `PRODUCT_PLAN.md` §4 for the full `users` / `documents` / `chunks` / `voices` / `reading_sessions` / `document_shares` schema. Keep schema changes reflected in that doc.
 
 ## Build Phases
 
@@ -47,5 +58,5 @@ Follow the phase order in `PRODUCT_PLAN.md` §5 — don't jump ahead to Phase 2 
 ## Conventions
 
 - No comments explaining *what* code does — name things clearly instead. Comments only for non-obvious *why* (e.g. a provider quirk, a workaround).
-- No auth/multi-user scaffolding — this is explicitly a single-user personal tool for v1.
+- This is a small invite-only group, not a public multi-tenant product — don't add scaffolding (self-service signup UI, org/team hierarchies, public directories) beyond the three-role model above unless asked.
 - Don't add abstractions (config layers, provider-swap interfaces, feature flags) for providers/features not yet in scope — build for the current phase, not hypothetical future providers.

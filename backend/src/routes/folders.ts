@@ -1,10 +1,13 @@
 import { Router } from 'express'
-import { createFolder, deleteFolder, getFolder, listFolders, renameFolder } from '../db/folders.js'
+import { createFolder, deleteFolder, getFolder, listFoldersByOwner, renameFolder } from '../db/folders.js'
+import { requireAuth } from '../middleware/auth.js'
 
 export const foldersRouter = Router()
 
-foldersRouter.get('/', async (_req, res) => {
-  const folders = await listFolders()
+foldersRouter.use(requireAuth)
+
+foldersRouter.get('/', async (req, res) => {
+  const folders = await listFoldersByOwner(req.user!.id)
   res.json({ folders })
 })
 
@@ -15,7 +18,7 @@ foldersRouter.post('/', async (req, res) => {
     return
   }
 
-  const folder = await createFolder(name)
+  const folder = await createFolder(name, req.user!.id)
   res.status(201).json({ folder })
 })
 
@@ -27,7 +30,7 @@ foldersRouter.patch('/:id', async (req, res) => {
   }
 
   const existing = await getFolder(req.params.id)
-  if (!existing) {
+  if (!existing || existing.ownerId !== req.user!.id) {
     res.status(404).json({ error: 'Folder not found' })
     return
   }
@@ -38,7 +41,7 @@ foldersRouter.patch('/:id', async (req, res) => {
 
 foldersRouter.delete('/:id', async (req, res) => {
   const existing = await getFolder(req.params.id)
-  if (!existing) {
+  if (!existing || existing.ownerId !== req.user!.id) {
     res.status(404).json({ error: 'Folder not found' })
     return
   }

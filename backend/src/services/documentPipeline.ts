@@ -63,6 +63,7 @@ export interface IngestInput {
   fileBuffer: Buffer
   fileContentType: string
   extractedText: string
+  ownerId: string
   voiceId?: string
   /** PDF-only: per-word bounding boxes from pdfLayout.ts, stored on the document for the Page view reader. */
   pageLayout?: Pick<PdfLayout, 'pages' | 'words'>
@@ -96,6 +97,7 @@ export async function ingestDocument(input: IngestInput): Promise<DocumentRow> {
     sourceType: input.sourceType,
     originalFileKey,
     voiceId: voice.id,
+    ownerId: input.ownerId,
     pageLayout: input.pageLayout ?? null,
   })
 
@@ -121,6 +123,7 @@ export interface IngestPdfInput {
   title: string
   fileBuffer: Buffer
   fileContentType: string
+  ownerId: string
   voiceId?: string
 }
 
@@ -148,6 +151,7 @@ export async function ingestPdfDocument(input: IngestPdfInput): Promise<Document
     sourceType: 'pdf',
     originalFileKey,
     voiceId: voice.id,
+    ownerId: input.ownerId,
     pageLayout: null,
   })
 

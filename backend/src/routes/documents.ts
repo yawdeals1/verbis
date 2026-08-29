@@ -1,20 +1,26 @@
 import { Router, type Request, type Response } from 'express'
 import multer from 'multer'
 import path from 'node:path'
-import { deleteDocument, getDocument, listDocuments, updateLastPosition } from '../db/documents.js'
+import { deleteDocument, getDocument, listDocumentsByOwner, updateLastPosition } from '../db/documents.js'
 import { getFolder } from '../db/folders.js'
 import { addDocumentToFolder, listAllDocumentFolders, listFolderIdsForDocument, removeDocumentFromFolder } from '../db/documentFolders.js'
 import { getChunksForDocument } from '../db/chunks.js'
 import { getVoice } from '../db/voices.js'
+import { getUserById, getUserByUsername } from '../db/users.js'
+import { findShare, listSharesForDocument, listSharesForUser, removeShare, shareDocument } from '../db/documentShares.js'
 import { deleteObject, getObjectBuffer, putObject } from '../storage/index.js'
 import { extractDocxText, extractEpubText, extractTxtText } from '../services/textExtraction.js'
 import { ingestDocument, ingestPdfDocument, NoTextExtractedError } from '../services/documentPipeline.js'
+import { requireAuth, requireRole } from '../middleware/auth.js'
+import { getAccessibleDocument, getOwnedDocument } from '../lib/documentAccess.js'
 import { scanRouter } from './scan.js'
 import { insightsRouter } from './insights.js'
 import { urlImportRouter } from './urlImport.js'
-import type { SourceType } from '../db/types.js'
+import type { DocumentRow, SourceType } from '../db/types.js'
 
 export const documentsRouter = Router()
+
+documentsRouter.use(requireAuth)
 
 documentsRouter.use('/scan', scanRouter)
 documentsRouter.use('/url', urlImportRouter)
@@ -39,7 +45,7 @@ function sourceTypeFromFilename(filename: string): SourceType | null {
   return null
 }
 
-documentsRouter.post('/', upload.single('file'), async (req, res) => {
+documentsRouter.post('/', requireRole('admin', 'contributor'), upload.single('file'), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: 'Missing file' })
     return
@@ -58,6 +64,7 @@ documentsRouter.post('/', upload.single('file'), async (req, res) => {
 
   try {
     const title = path.basename(req.file.originalname, path.extname(req.file.originalname))
+    const ownerId = req.user!.id
 
     const document =
       sourceType === 'pdf'
@@ -65,6 +72,7 @@ documentsRouter.post('/', upload.single('file'), async (req, res) => {
             title,
             fileBuffer: req.file.buffer,
             fileContentType: req.file.mimetype || 'application/octet-stream',
+            ownerId,
             voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
           })
         : await ingestDocument({
@@ -73,6 +81,7 @@ documentsRouter.post('/', upload.single('file'), async (req, res) => {
             fileBuffer: req.file.buffer,
             fileContentType: req.file.mimetype || 'application/octet-stream',
             extractedText: await EXTRACTORS[sourceType]!(req.file.buffer),
+            ownerId,
             voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
           })
 
@@ -87,18 +96,31 @@ documentsRouter.post('/', upload.single('file'), async (req, res) => {
   }
 })
 
-documentsRouter.get('/', async (_req, res) => {
-  const [documents, folderMap] = await Promise.all([listDocuments(), listAllDocumentFolders()])
-  // N+1, but this is a single-user app with a handful of documents at most —
-  // the Studio API has no aggregate/join query, so per-document chunk counts
-  // (used to tell "first chunk ready" apart from "fully generated" in the
-  // Library list) have to be fetched individually.
+documentsRouter.get('/', async (req, res) => {
+  const user = req.user!
+  const [owned, shares, folderMap] = await Promise.all([
+    listDocumentsByOwner(user.id),
+    listSharesForUser(user.id),
+    listAllDocumentFolders(),
+  ])
+
+  const sharedDocs = (await Promise.all(shares.map((s) => getDocument(s.documentId)))).filter(
+    (d): d is DocumentRow => d !== null,
+  )
+
+  const all = [...owned.map((d) => ({ doc: d, isOwner: true })), ...sharedDocs.map((d) => ({ doc: d, isOwner: false }))]
+
+  // N+1, but this is a personal app with a handful of documents per user at
+  // most — the Studio API has no aggregate/join query, so per-document
+  // chunk counts (used to tell "first chunk ready" apart from "fully
+  // generated" in the Library list) have to be fetched individually.
   const withChunkCounts = await Promise.all(
-    documents.map(async (document) => {
-      const chunks = await getChunksForDocument(document.id)
+    all.map(async ({ doc, isOwner }) => {
+      const chunks = await getChunksForDocument(doc.id)
       return {
-        ...document,
-        folderIds: folderMap.get(document.id) ?? [],
+        ...doc,
+        isOwner,
+        folderIds: isOwner ? (folderMap.get(doc.id) ?? []) : [],
         chunksTotal: chunks.length,
         chunksReady: chunks.filter((c) => c.status === 'ready').length,
       }
@@ -108,21 +130,23 @@ documentsRouter.get('/', async (_req, res) => {
 })
 
 documentsRouter.get('/:id', async (req, res) => {
-  const document = await getDocument(req.params.id)
+  const document = await getAccessibleDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
   }
 
+  const isOwner = document.ownerId === req.user!.id
   const [chunks, voice, folderIds] = await Promise.all([
     getChunksForDocument(document.id),
     document.voiceId ? getVoice(document.voiceId) : Promise.resolve(null),
-    listFolderIdsForDocument(document.id),
+    isOwner ? listFolderIdsForDocument(document.id) : Promise.resolve([]),
   ])
 
   res.json({
     document: {
       ...document,
+      isOwner,
       folderIds,
       chunksTotal: chunks.length,
       chunksReady: chunks.filter((c) => c.status === 'ready').length,
@@ -142,7 +166,7 @@ documentsRouter.get('/:id', async (req, res) => {
 })
 
 documentsRouter.get('/:id/original', async (req, res) => {
-  const document = await getDocument(req.params.id)
+  const document = await getAccessibleDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
@@ -193,7 +217,7 @@ function sendAudioBuffer(req: Request, res: Response, buffer: Buffer, cacheContr
 }
 
 documentsRouter.get('/:id/chunks/:sequenceIndex/audio', async (req, res) => {
-  const document = await getDocument(req.params.id)
+  const document = await getAccessibleDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
@@ -248,7 +272,7 @@ function resolvedChunkCount(chunks: { status: string }[]): number {
  * says whether that's the whole document or there's still more coming.
  */
 documentsRouter.post('/:id/merge', async (req, res) => {
-  const document = await getDocument(req.params.id)
+  const document = await getAccessibleDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
@@ -274,7 +298,7 @@ documentsRouter.post('/:id/merge', async (req, res) => {
 })
 
 documentsRouter.get('/:id/merged-audio', async (req, res) => {
-  const document = await getDocument(req.params.id)
+  const document = await getAccessibleDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
@@ -292,7 +316,7 @@ documentsRouter.get('/:id/merged-audio', async (req, res) => {
 })
 
 documentsRouter.delete('/:id', async (req, res) => {
-  const document = await getDocument(req.params.id)
+  const document = await getOwnedDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
@@ -314,14 +338,14 @@ documentsRouter.delete('/:id', async (req, res) => {
 })
 
 documentsRouter.post('/:id/folders/:folderId', async (req, res) => {
-  const document = await getDocument(req.params.id)
+  const document = await getOwnedDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
   }
 
   const folder = await getFolder(req.params.folderId)
-  if (!folder) {
+  if (!folder || folder.ownerId !== req.user!.id) {
     res.status(404).json({ error: 'Folder not found' })
     return
   }
@@ -331,7 +355,7 @@ documentsRouter.post('/:id/folders/:folderId', async (req, res) => {
 })
 
 documentsRouter.delete('/:id/folders/:folderId', async (req, res) => {
-  const document = await getDocument(req.params.id)
+  const document = await getOwnedDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
@@ -348,12 +372,72 @@ documentsRouter.patch('/:id/position', async (req, res) => {
     return
   }
 
-  const document = await getDocument(req.params.id)
+  // Position is stored on the document row itself, not per-user — so only
+  // the owner's resume position is persisted. A shared recipient still gets
+  // full playback, just without a saved resume point server-side.
+  const document = await getOwnedDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
   }
 
   await updateLastPosition(document.id, { chunkSequenceIndex, timeSeconds })
+  res.status(204).send()
+})
+
+documentsRouter.get('/:id/shares', async (req, res) => {
+  const document = await getOwnedDocument(req.params.id, req.user!)
+  if (!document) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  const shares = await listSharesForDocument(document.id)
+  const withUsernames = await Promise.all(
+    shares.map(async (s) => ({ id: s.id, userId: s.sharedWithUserId, username: (await getUserById(s.sharedWithUserId))?.username })),
+  )
+  res.json({ shares: withUsernames })
+})
+
+documentsRouter.post('/:id/shares', async (req, res) => {
+  const username = typeof req.body?.username === 'string' ? req.body.username.trim() : ''
+  if (!username) {
+    res.status(400).json({ error: 'username is required' })
+    return
+  }
+
+  const document = await getOwnedDocument(req.params.id, req.user!)
+  if (!document) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  const target = await getUserByUsername(username)
+  if (!target) {
+    res.status(404).json({ error: `No user with username "${username}"` })
+    return
+  }
+  if (target.id === req.user!.id) {
+    res.status(400).json({ error: "You already own this document." })
+    return
+  }
+  if (await findShare(document.id, target.id)) {
+    res.status(204).send()
+    return
+  }
+
+  await shareDocument({ documentId: document.id, sharedByUserId: req.user!.id, sharedWithUserId: target.id })
+  res.status(201).json({ userId: target.id, username: target.username })
+})
+
+documentsRouter.delete('/:id/shares/:userId', async (req, res) => {
+  const document = await getOwnedDocument(req.params.id, req.user!)
+  if (!document) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  const share = await findShare(document.id, req.params.userId)
+  if (share) await removeShare(share.id)
   res.status(204).send()
 })

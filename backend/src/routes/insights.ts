@@ -1,7 +1,8 @@
 import { Router } from 'express'
-import { getDocument, updateSummary } from '../db/documents.js'
+import { updateSummary } from '../db/documents.js'
 import { getChunksForDocument } from '../db/chunks.js'
 import { answerQuestion, summarizeDocument } from '../services/ollama.js'
+import { getAccessibleDocument } from '../lib/documentAccess.js'
 
 export const insightsRouter = Router()
 
@@ -13,7 +14,7 @@ async function fullTextFor(documentId: string): Promise<string> {
 // Phase 4 (optional expansion, PRODUCT_PLAN.md §5): summarize the current
 // document. Cached on the document row after first generation.
 insightsRouter.post('/:id/summary', async (req, res) => {
-  const document = await getDocument(req.params.id)
+  const document = await getAccessibleDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return
@@ -43,7 +44,7 @@ insightsRouter.post('/:id/qa', async (req, res) => {
     return
   }
 
-  const document = await getDocument(req.params.id)
+  const document = await getAccessibleDocument(req.params.id, req.user!)
   if (!document) {
     res.status(404).json({ error: 'Document not found' })
     return

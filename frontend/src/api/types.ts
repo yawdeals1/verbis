@@ -1,6 +1,22 @@
 export type SourceType = 'pdf' | 'docx' | 'txt' | 'epub' | 'scan' | 'url'
 export type DocumentStatus = 'processing' | 'ready' | 'error'
 export type ChunkStatus = 'pending' | 'ready' | 'error'
+export type UserRole = 'admin' | 'member' | 'contributor'
+
+export interface CurrentUser {
+  id: string
+  username: string
+  email: string
+  role: UserRole
+}
+
+export interface AdminUser {
+  id: string
+  username: string
+  email: string
+  role: UserRole
+  createdAt: string
+}
 
 export interface LastPosition {
   chunkSequenceIndex: number
@@ -41,6 +57,9 @@ export interface Document {
   sourceType: SourceType
   originalFileKey: string
   voiceId: string | null
+  ownerId: string
+  /** False when this document is in the library only via a share, not owned by the current user — controls whether upload/delete/folder/share affordances show. */
+  isOwner: boolean
   folderIds: string[]
   status: DocumentStatus
   errorMessage: string | null

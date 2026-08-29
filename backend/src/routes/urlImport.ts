@@ -1,13 +1,14 @@
 import { Router } from 'express'
 import { extractFromUrl } from '../services/urlImport.js'
 import { ingestDocument, NoTextExtractedError } from '../services/documentPipeline.js'
+import { requireRole } from '../middleware/auth.js'
 
 export const urlImportRouter = Router()
 
 // Web page import via URL (PRODUCT_PLAN.md §5, Phase 3 P1): paste a link,
 // strip to readable text, feed into the same chunk/TTS pipeline as any
 // other import.
-urlImportRouter.post('/', async (req, res) => {
+urlImportRouter.post('/', requireRole('admin', 'contributor'), async (req, res) => {
   const url = typeof req.body?.url === 'string' ? req.body.url.trim() : ''
   if (!url) {
     res.status(400).json({ error: 'url is required' })
@@ -23,6 +24,7 @@ urlImportRouter.post('/', async (req, res) => {
       fileBuffer: Buffer.from(text, 'utf-8'),
       fileContentType: 'text/plain',
       extractedText: text,
+      ownerId: req.user!.id,
       voiceId: typeof req.body.voiceId === 'string' ? req.body.voiceId : undefined,
     })
 

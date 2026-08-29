@@ -3,9 +3,12 @@ import { listVoiceRows, upsertVoice } from '../db/voices.js'
 import { mapWithConcurrency } from '../lib/concurrency.js'
 import { activeProvider, listVoices as listProviderVoices, type TtsProvider } from '../services/tts.js'
 import { regionRank } from '../services/ttsTypes.js'
+import { requireAuth } from '../middleware/auth.js'
 import type { VoiceRow } from '../db/types.js'
 
 export const voicesRouter = Router()
+
+voicesRouter.use(requireAuth)
 
 // A first-ever sync of Speechify's ~700-voice catalog is all new rows, so
 // the diffing below can't skip any of them — this caps how many upserts run

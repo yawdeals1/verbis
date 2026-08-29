@@ -11,7 +11,9 @@ import {
   renameFolder,
 } from '../api/client'
 import type { Document, Folder } from '../api/types'
-import { CheckIcon, FolderIcon, PlusIcon, TrashIcon } from '../components/icons'
+import { useAuth } from '../contexts/AuthContext'
+import { CheckIcon, FolderIcon, PlusIcon, ShareIcon, TrashIcon } from '../components/icons'
+import ShareDialog from '../components/ShareDialog'
 
 // pdfjs-dist is a large dependency (~600kB) — load it only when a PDF tile
 // actually needs to render a thumbnail, not on every Library visit.
@@ -44,11 +46,14 @@ function statusClass(document: Document): string {
 }
 
 export default function Library() {
+  const { user } = useAuth()
+  const canUpload = user?.role === 'admin' || user?.role === 'contributor'
   const [documents, setDocuments] = useState<Document[] | null>(null)
   const [folders, setFolders] = useState<Folder[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState<FolderFilter>(ALL)
+  const [sharingDoc, setSharingDoc] = useState<Document | null>(null)
 
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
@@ -175,10 +180,12 @@ export default function Library() {
             </p>
           )}
         </div>
-        <Link to="/import" className="btn btn-primary">
-          <PlusIcon width={16} height={16} />
-          Import
-        </Link>
+        {canUpload && (
+          <Link to="/import" className="btn btn-primary">
+            <PlusIcon width={16} height={16} />
+            Import
+          </Link>
+        )}
       </div>
 
       {documents && documents.length > 0 && (
@@ -290,11 +297,17 @@ export default function Library() {
       {documents?.length === 0 && (
         <div className="empty-state">
           <h2>Nothing here yet</h2>
-          <p>Import a PDF or DOCX, or scan a page from a physical book, and it'll show up here ready to listen to.</p>
-          <Link to="/import" className="btn btn-primary">
-            <PlusIcon width={16} height={16} />
-            Import your first document
-          </Link>
+          <p>
+            {canUpload
+              ? "Import a PDF or DOCX, or scan a page from a physical book, and it'll show up here ready to listen to."
+              : 'Nobody has shared a document with you yet.'}
+          </p>
+          {canUpload && (
+            <Link to="/import" className="btn btn-primary">
+              <PlusIcon width={16} height={16} />
+              Import your first document
+            </Link>
+          )}
         </div>
       )}
 
@@ -324,27 +337,41 @@ export default function Library() {
                   <Link to={`/reader/${doc.id}`} className="library-card-title">
                     {doc.title}
                   </Link>
-                  <button
-                    type="button"
-                    className="btn btn-icon btn-danger-ghost library-card-delete"
-                    onClick={() => handleDelete(doc)}
-                    disabled={deletingId === doc.id}
-                    aria-label={`Delete ${doc.title}`}
-                    title="Delete"
-                  >
-                    <TrashIcon width={14} height={14} />
-                  </button>
+                  {doc.isOwner && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-icon btn-ghost"
+                        onClick={() => setSharingDoc(doc)}
+                        aria-label={`Share ${doc.title}`}
+                        title="Share"
+                      >
+                        <ShareIcon width={14} height={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-icon btn-danger-ghost library-card-delete"
+                        onClick={() => handleDelete(doc)}
+                        disabled={deletingId === doc.id}
+                        aria-label={`Delete ${doc.title}`}
+                        title="Delete"
+                      >
+                        <TrashIcon width={14} height={14} />
+                      </button>
+                    </>
+                  )}
                 </div>
                 <span className={`badge ${statusBadgeClass(doc)}`}>
                   <span className="badge-dot" />
                   {statusLabel(doc)}
                 </span>
+                {!doc.isOwner && <span className="badge">Shared with you</span>}
                 {progress > 0 && progress < 100 && (
                   <div className="progress-track">
                     <div className="progress-fill" style={{ width: `${progress}%` }} />
                   </div>
                 )}
-                {folders && folders.length > 0 && (
+                {doc.isOwner && folders && folders.length > 0 && (
                   <FolderPicker doc={doc} folders={folders} onToggleFolder={(folderId) => handleToggleFolder(doc, folderId)} />
                 )}
                 <p className="library-card-meta">{new Date(doc.createdAt).toLocaleDateString()}</p>
@@ -353,6 +380,10 @@ export default function Library() {
           )
         })}
       </ul>
+
+      {sharingDoc && (
+        <ShareDialog documentId={sharingDoc.id} documentTitle={sharingDoc.title} onClose={() => setSharingDoc(null)} />
+      )}
     </section>
   )
 }

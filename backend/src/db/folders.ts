@@ -7,17 +7,18 @@ function mapRow(row: Record<string, unknown>): FolderRow {
   return {
     id: row.id as string,
     name: row.name as string,
+    ownerId: row.owner_id as string,
     createdAt: new Date(row.created_at as string).toISOString(),
   }
 }
 
-export async function createFolder(name: string): Promise<FolderRow> {
-  const row = await insertRow<Record<string, unknown>>(TABLE, { name })
+export async function createFolder(name: string, ownerId: string): Promise<FolderRow> {
+  const row = await insertRow<Record<string, unknown>>(TABLE, { name, owner_id: ownerId })
   return mapRow(row)
 }
 
-export async function listFolders(): Promise<FolderRow[]> {
-  const rows = await listRows<Record<string, unknown>>(TABLE)
+export async function listFoldersByOwner(ownerId: string): Promise<FolderRow[]> {
+  const rows = await listRows<Record<string, unknown>>(TABLE, { filter: { owner_id: ownerId } })
   return rows.map(mapRow).sort((a, b) => a.name.localeCompare(b.name))
 }
 

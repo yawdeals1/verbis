@@ -36,6 +36,31 @@ export const env = {
   get deploroApiToken() {
     return required('DEPLORO_API_TOKEN')
   },
+
+  // Deploro Auth-as-a-Service for the project's own end users (invite-only
+  // sign-in — see lib/deploroAuth.ts). Base URL is the Deploro worker itself
+  // (same host as `deploro baseUrl` in ~/.deploro/credentials.json), not
+  // this app's own domain — auth is proxied server-to-server because the
+  // session cookie Deploro issues is scoped to its own worker domain, not
+  // Verbis's.
+  get deploroAuthBaseUrl() {
+    return required('DEPLORO_AUTH_BASE_URL').replace(/\/+$/, '')
+  },
+  get deploroAuthSlug() {
+    return optional('DEPLORO_AUTH_SLUG') ?? 'verbis'
+  },
+  // Which origin the frontend is served from, for CORS credentialed
+  // requests. In production the frontend and backend are same-origin
+  // (nginx proxies /api/* — see deploro.compose.yml), so this only matters
+  // for local dev where Vite (5173) and the API (3001) are cross-origin.
+  get frontendOrigin() {
+    return optional('FRONTEND_ORIGIN') ?? 'http://localhost:5173'
+  },
+  // The `verbis_session` cookie's Secure flag — must be false for local
+  // dev over plain http://, true in any real deployment.
+  get sessionCookieSecure(): boolean {
+    return (optional('SESSION_COOKIE_SECURE') ?? (this.nodeEnv === 'production' ? 'true' : 'false')) === 'true'
+  },
   // Which TTS backend generates chunk audio. `speechify` is the default:
   // its speech marks carry per-word character offsets and times in the same
   // response as the audio, which is what synced highlighting needs. Set to

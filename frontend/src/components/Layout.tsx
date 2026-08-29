@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link, Outlet } from 'react-router-dom'
+import { Link, Outlet, useNavigate } from 'react-router-dom'
 import { getHealth } from '../api/client'
 import { useTheme } from '../hooks/useTheme'
-import { MoonIcon, SunIcon, SystemIcon } from './icons'
+import { useAuth } from '../contexts/AuthContext'
+import { LogOutIcon, MoonIcon, SunIcon, SystemIcon, UserIcon } from './icons'
 
 type ApiStatus = 'checking' | 'connected' | 'unreachable'
 
@@ -18,6 +19,13 @@ export default function Layout() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking')
   const [theme, setTheme] = useTheme()
   const ThemeIcon = THEME_ICON[theme]
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login', { replace: true })
+  }
 
   useEffect(() => {
     getHealth()
@@ -50,6 +58,23 @@ export default function Layout() {
           >
             <ThemeIcon width={17} height={17} />
           </button>
+          {user && (
+            <div className="user-menu">
+              <span className="user-menu-name">
+                <UserIcon width={14} height={14} />
+                {user.username}
+              </span>
+              <span className={`badge ${user.role === 'admin' ? 'badge-ready' : 'badge-processing'}`}>{user.role}</span>
+              {user.role === 'admin' && (
+                <Link to="/admin" className="btn btn-ghost btn-sm">
+                  Admin
+                </Link>
+              )}
+              <button type="button" className="btn btn-ghost btn-icon" onClick={handleLogout} aria-label="Sign out" title="Sign out">
+                <LogOutIcon width={16} height={16} />
+              </button>
+            </div>
+          )}
         </div>
       </header>
       <main className="app-main">
