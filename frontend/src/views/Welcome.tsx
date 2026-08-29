@@ -1,21 +1,32 @@
-import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { acceptInvite } from '../api/client'
 
+// Deploro's confirmation-link redirect only ever appends `?verified=1` —
+// no way to tell, server-side or from the URL, which of the *two* separate
+// confirmations just happened: the admin-add notification (invitee still
+// needs to choose a password) or the real email_password signup from this
+// page's own form (invitee is done and should go sign in). Both land back
+// on this same page since Deploro's Auth Site URL is one project-wide
+// setting. This flag — set right before the real signup's confirmation
+// email is sent, cleared the moment it's consumed — is what tells the two
+// apart on a same-device return trip.
+const PENDING_KEY = 'verbis_awaiting_confirm'
+
 /**
- * Reached only via the admin-add "Confirm your account" email an invite
- * sends (Deploro's Auth Site URL points here — `deploro auth site-url`),
- * never linked from the login page. Deploro has no admin-initiated
- * "here's a link to set your password" primitive and its password-reset
- * email doesn't actually get delivered (verified live) — so this page
- * itself is where the invitee chooses their real password, submitted
- * straight to our own /auth/accept-invite rather than anything Deploro
- * hosts. The email they just clicked only confirmed a harmless,
- * passwordless placeholder identity — it never touches whatever password
- * they enter here.
+ * Reached via two different Deploro confirmation emails, both redirecting
+ * here (see the note above): first the admin-add "Confirm your account"
+ * notification an invite sends, where the invitee chooses their real
+ * password (submitted straight to our own /auth/accept-invite, never
+ * anything Deploro hosts — see that route's doc comment for why). Once
+ * they submit, confirming Deploro's *second* email — for the real
+ * email_password identity this form just created — lands here again, and
+ * should go straight to sign-in instead of asking them to choose a
+ * password a second time.
  */
 export default function Welcome() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const verified = searchParams.get('verified') === '1'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -23,12 +34,20 @@ export default function Welcome() {
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
 
+  useEffect(() => {
+    if (verified && localStorage.getItem(PENDING_KEY)) {
+      localStorage.removeItem(PENDING_KEY)
+      navigate('/login?confirmed=1', { replace: true })
+    }
+  }, [verified, navigate])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
     setError(null)
     try {
       await acceptInvite(email.trim(), password)
+      localStorage.setItem(PENDING_KEY, '1')
       setDone(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set up your account')

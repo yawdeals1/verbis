@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const justConfirmed = searchParams.get('confirmed') === '1'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -35,6 +37,11 @@ export default function Login() {
       </div>
 
       <form className="import-form" onSubmit={handleSubmit}>
+        {justConfirmed && (
+          <p className="field-hint" style={{ color: 'var(--success, inherit)' }}>
+            Your account is confirmed — sign in below.
+          </p>
+        )}
         <label className="field">
           <span className="field-label">Email</span>
           <input
