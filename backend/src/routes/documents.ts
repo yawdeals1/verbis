@@ -123,6 +123,7 @@ documentsRouter.get('/', async (req, res) => {
         folderIds: isOwner ? (folderMap.get(doc.id) ?? []) : [],
         chunksTotal: chunks.length,
         chunksReady: chunks.filter((c) => c.status === 'ready').length,
+        durationSeconds: chunks.reduce((sum, c) => sum + (c.durationSeconds ?? 0), 0),
       }
     }),
   )
@@ -150,6 +151,7 @@ documentsRouter.get('/:id', async (req, res) => {
       folderIds,
       chunksTotal: chunks.length,
       chunksReady: chunks.filter((c) => c.status === 'ready').length,
+      durationSeconds: chunks.reduce((sum, c) => sum + (c.durationSeconds ?? 0), 0),
     },
     voice,
     chunks: chunks.map((chunk) => ({

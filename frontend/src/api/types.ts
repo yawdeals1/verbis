@@ -72,6 +72,8 @@ export interface Document {
   createdAt: string
   chunksTotal: number
   chunksReady: number
+  /** Sum of every generated chunk's audio length so far — the document's full runtime once fully generated. */
+  durationSeconds: number
 }
 
 export interface WordTiming {

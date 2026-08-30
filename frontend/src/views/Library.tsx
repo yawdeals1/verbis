@@ -45,6 +45,15 @@ function statusClass(document: Document): string {
   return 'ready'
 }
 
+function formatDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${Math.round(totalSeconds)}s`
+  const totalMinutes = Math.round(totalSeconds / 60)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours === 0) return `${minutes}m`
+  return `${hours}h ${minutes}m`
+}
+
 export default function Library() {
   const { user } = useAuth()
   const canUpload = user?.role === 'admin' || user?.role === 'contributor'
@@ -168,6 +177,7 @@ export default function Library() {
         : documents?.filter((d) => d.folderIds.includes(activeFilter))
 
   const activeFolder = folders?.find((f) => f.id === activeFilter) ?? null
+  const filteredDurationSeconds = filteredDocuments?.reduce((sum, d) => sum + d.durationSeconds, 0) ?? 0
 
   return (
     <section>
@@ -176,7 +186,8 @@ export default function Library() {
           <h1>Library</h1>
           {documents && documents.length > 0 && (
             <p className="view-subtitle">
-              {documents.length} document{documents.length === 1 ? '' : 's'}
+              {filteredDocuments?.length ?? 0} document{filteredDocuments?.length === 1 ? '' : 's'}
+              {filteredDurationSeconds > 0 && <> &middot; {formatDuration(filteredDurationSeconds)} total audio</>}
             </p>
           )}
         </div>
@@ -206,7 +217,9 @@ export default function Library() {
           )}
 
           {folders?.map((folder) => {
-            const count = documents.filter((d) => d.folderIds.includes(folder.id)).length
+            const docsInFolder = documents.filter((d) => d.folderIds.includes(folder.id))
+            const count = docsInFolder.length
+            const folderDurationSeconds = docsInFolder.reduce((sum, d) => sum + d.durationSeconds, 0)
             if (renamingFolderId === folder.id) {
               return (
                 <input
@@ -239,7 +252,11 @@ export default function Library() {
                     setRenamingFolderId(folder.id)
                     setRenameValue(folder.name)
                   }}
-                  title="Double-click to rename"
+                  title={
+                    folderDurationSeconds > 0
+                      ? `${formatDuration(folderDurationSeconds)} total audio — double-click to rename`
+                      : 'Double-click to rename'
+                  }
                 >
                   <FolderIcon width={13} height={13} />
                   {folder.name}
@@ -374,7 +391,10 @@ export default function Library() {
                 {doc.isOwner && folders && folders.length > 0 && (
                   <FolderPicker doc={doc} folders={folders} onToggleFolder={(folderId) => handleToggleFolder(doc, folderId)} />
                 )}
-                <p className="library-card-meta">{new Date(doc.createdAt).toLocaleDateString()}</p>
+                <p className="library-card-meta">
+                  {new Date(doc.createdAt).toLocaleDateString()}
+                  {doc.durationSeconds > 0 && <> &middot; {formatDuration(doc.durationSeconds)}</>}
+                </p>
               </div>
             </li>
           )
