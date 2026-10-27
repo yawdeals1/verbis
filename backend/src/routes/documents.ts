@@ -16,6 +16,7 @@ import { getAccessibleDocument, getOwnedDocument } from '../lib/documentAccess.j
 import { scanRouter } from './scan.js'
 import { insightsRouter } from './insights.js'
 import { urlImportRouter } from './urlImport.js'
+import { acceptStagedUpload } from './uploads.js'
 import type { DocumentRow, SourceType } from '../db/types.js'
 
 export const documentsRouter = Router()
@@ -26,7 +27,8 @@ documentsRouter.use('/scan', scanRouter)
 documentsRouter.use('/url', urlImportRouter)
 documentsRouter.use(insightsRouter)
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
+const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES } })
 
 // PDF is handled separately below (extractPdfLayout returns bounding-box
 // data alongside text, which these plain extractors don't).
@@ -45,7 +47,7 @@ function sourceTypeFromFilename(filename: string): SourceType | null {
   return null
 }
 
-documentsRouter.post('/', requireRole('admin', 'contributor'), upload.single('file'), async (req, res) => {
+documentsRouter.post('/', requireRole('admin', 'contributor'), upload.single('file'), acceptStagedUpload(MAX_DOCUMENT_BYTES), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: 'Missing file' })
     return
@@ -115,7 +117,9 @@ documentsRouter.get('/', async (req, res) => {
   // chunk counts (used to tell "first chunk ready" apart from "fully
   // generated" in the Library list) have to be fetched individually.
   const withChunkCounts = await Promise.all(
-    all.map(async ({ doc, isOwner }) => {
+    // pageLayout (per-word PDF bounding boxes) is left out: it made this
+    // list ~14MB across a few dozen PDFs, and only GET /:id's Reader uses it.
+    all.map(async ({ doc: { pageLayout: _pageLayout, ...doc }, isOwner }) => {
       const chunks = await getChunksForDocument(doc.id)
       return {
         ...doc,

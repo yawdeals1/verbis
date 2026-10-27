@@ -76,6 +76,9 @@ export interface Document {
   durationSeconds: number
 }
 
+/** The Library list leaves out `pageLayout` (per-word PDF bounding boxes, often hundreds of KB per document) — only the Reader needs it, via getDocument. */
+export type LibraryDocument = Omit<Document, 'pageLayout'>
+
 export interface WordTiming {
   word: string
   charStart: number

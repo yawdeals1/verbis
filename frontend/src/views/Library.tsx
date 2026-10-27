@@ -10,7 +10,7 @@ import {
   removeDocumentFromFolder,
   renameFolder,
 } from '../api/client'
-import type { Document, Folder } from '../api/types'
+import type { Folder, LibraryDocument } from '../api/types'
 import { useAuth } from '../contexts/AuthContext'
 import { CheckIcon, FolderIcon, PlusIcon, ShareIcon, TrashIcon } from '../components/icons'
 import ShareDialog from '../components/ShareDialog'
@@ -23,7 +23,7 @@ const UNFILED = 'unfiled'
 const ALL = 'all'
 type FolderFilter = typeof ALL | typeof UNFILED | string
 
-function statusLabel(document: Document): string {
+function statusLabel(document: LibraryDocument): string {
   if (document.status === 'processing') return 'Processing'
   if (document.status === 'error') return 'Error'
   if (document.chunksTotal > 0 && document.chunksReady < document.chunksTotal) {
@@ -32,14 +32,14 @@ function statusLabel(document: Document): string {
   return 'Ready'
 }
 
-function statusBadgeClass(document: Document): string {
+function statusBadgeClass(document: LibraryDocument): string {
   if (document.status === 'processing') return 'badge-processing'
   if (document.status === 'error') return 'badge-error'
   if (document.chunksTotal > 0 && document.chunksReady < document.chunksTotal) return 'badge-processing'
   return 'badge-ready'
 }
 
-function statusClass(document: Document): string {
+function statusClass(document: LibraryDocument): string {
   if (document.status === 'processing') return 'processing'
   if (document.status === 'error') return 'error'
   return 'ready'
@@ -57,12 +57,12 @@ function formatDuration(totalSeconds: number): string {
 export default function Library() {
   const { user } = useAuth()
   const canUpload = user?.role === 'admin' || user?.role === 'contributor'
-  const [documents, setDocuments] = useState<Document[] | null>(null)
+  const [documents, setDocuments] = useState<LibraryDocument[] | null>(null)
   const [folders, setFolders] = useState<Folder[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState<FolderFilter>(ALL)
-  const [sharingDoc, setSharingDoc] = useState<Document | null>(null)
+  const [sharingDoc, setSharingDoc] = useState<LibraryDocument | null>(null)
 
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
@@ -88,7 +88,7 @@ export default function Library() {
     if (isCreatingFolder) newFolderInputRef.current?.focus()
   }, [isCreatingFolder])
 
-  const handleDelete = async (doc: Document) => {
+  const handleDelete = async (doc: LibraryDocument) => {
     if (!window.confirm(`Delete "${doc.title}"? This permanently removes it and its generated audio.`)) return
 
     setDeletingId(doc.id)
@@ -102,7 +102,7 @@ export default function Library() {
     }
   }
 
-  const handleToggleFolder = async (doc: Document, folderId: string) => {
+  const handleToggleFolder = async (doc: LibraryDocument, folderId: string) => {
     const wasInFolder = doc.folderIds.includes(folderId)
     const nextFolderIds = wasInFolder ? doc.folderIds.filter((id) => id !== folderId) : [...doc.folderIds, folderId]
     setDocuments((docs) => docs?.map((d) => (d.id === doc.id ? { ...d, folderIds: nextFolderIds } : d)) ?? docs)
@@ -413,7 +413,7 @@ function FolderPicker({
   folders,
   onToggleFolder,
 }: {
-  doc: Document
+  doc: LibraryDocument
   folders: Folder[]
   onToggleFolder: (folderId: string) => void
 }) {

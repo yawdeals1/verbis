@@ -8,6 +8,7 @@ import { voicesRouter } from './routes/voices.js'
 import { foldersRouter } from './routes/folders.js'
 import { authRouter } from './routes/auth.js'
 import { adminRouter } from './routes/admin.js'
+import { uploadsRouter } from './routes/uploads.js'
 
 const app = express()
 
@@ -23,6 +24,7 @@ app.use(cookieParser())
 app.use('/health', healthRouter)
 app.use('/auth', authRouter)
 app.use('/admin', adminRouter)
+app.use('/uploads', uploadsRouter)
 app.use('/documents', documentsRouter)
 app.use('/voices', voicesRouter)
 app.use('/folders', foldersRouter)

@@ -1,4 +1,4 @@
-import type { AdminUser, CurrentUser, Document, DocumentDetail, Folder, Voice } from './types'
+import type { AdminUser, CurrentUser, Document, DocumentDetail, Folder, LibraryDocument, Voice } from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001'
 
@@ -11,12 +11,20 @@ export class ApiError extends Error {
   }
 }
 
+// Over HTTP/2 statusText is always empty, so a non-JSON error page (e.g. a
+// proxy's 413) would otherwise surface as a blank message and the import
+// form would just silently reset.
+function fallbackMessage(response: Response): string {
+  if (response.status === 413) return 'This file is too large to upload.'
+  return response.statusText || `Request failed (${response.status})`
+}
+
 async function parseErrorMessage(response: Response): Promise<string> {
   try {
     const body = await response.json()
-    return typeof body?.error === 'string' ? body.error : response.statusText
+    return typeof body?.error === 'string' ? body.error : fallbackMessage(response)
   } catch {
-    return response.statusText
+    return fallbackMessage(response)
   }
 }
 
@@ -36,7 +44,43 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-async function upload<T>(path: string, formData: FormData): Promise<T> {
+// Deploro's shared VPS proxy rejects request bodies over 1MB before they
+// reach the backend, so anything bigger is staged in parts via /uploads and
+// the import route is then called with its uploadId (backend routes/uploads.ts).
+const DIRECT_UPLOAD_MAX_BYTES = 512 * 1024
+const PARALLEL_PART_UPLOADS = 4
+
+async function stageFile(file: File): Promise<string> {
+  const { uploadId, partSize } = await request<{ uploadId: string; partSize: number }>('/uploads', {
+    method: 'POST',
+    body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size }),
+  })
+
+  const partCount = Math.ceil(file.size / partSize)
+  let nextPart = 0
+  const sendParts = async () => {
+    while (nextPart < partCount) {
+      const index = nextPart++
+      await request<void>(`/uploads/${uploadId}/parts/${index}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file.slice(index * partSize, (index + 1) * partSize),
+      })
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(PARALLEL_PART_UPLOADS, partCount) }, sendParts))
+
+  return uploadId
+}
+
+async function upload<T>(path: string, file: File, fields: Record<string, string | undefined>): Promise<T> {
+  const formData = new FormData()
+  if (file.size <= DIRECT_UPLOAD_MAX_BYTES) formData.append('file', file)
+  else formData.append('uploadId', await stageFile(file))
+  for (const [key, value] of Object.entries(fields)) {
+    if (value) formData.append(key, value)
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, { method: 'POST', body: formData, credentials: 'include' })
 
   if (!response.ok) {
@@ -56,7 +100,7 @@ export function getHealth() {
 }
 
 export function listDocuments() {
-  return request<{ documents: Document[] }>('/documents')
+  return request<{ documents: LibraryDocument[] }>('/documents')
 }
 
 export function getDocument(id: string) {
@@ -64,18 +108,11 @@ export function getDocument(id: string) {
 }
 
 export function uploadDocument(file: File, voiceId?: string) {
-  const formData = new FormData()
-  formData.append('file', file)
-  if (voiceId) formData.append('voiceId', voiceId)
-  return upload<{ document: Document }>('/documents', formData)
+  return upload<{ document: Document }>('/documents', file, { voiceId })
 }
 
 export function uploadScan(file: File, opts: { voiceId?: string; title?: string }) {
-  const formData = new FormData()
-  formData.append('file', file)
-  if (opts.voiceId) formData.append('voiceId', opts.voiceId)
-  if (opts.title) formData.append('title', opts.title)
-  return upload<{ document: Document }>('/documents/scan', formData)
+  return upload<{ document: Document }>('/documents/scan', file, { voiceId: opts.voiceId, title: opts.title })
 }
 
 export function importUrl(url: string, voiceId?: string) {
