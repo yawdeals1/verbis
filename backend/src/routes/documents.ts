@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import multer from 'multer'
 import path from 'node:path'
-import { deleteDocument, getDocument, listDocumentsByOwner, updateLastPosition } from '../db/documents.js'
+import { deleteDocument, getDocument, listDocumentsByOwner, loadPageLayout, updateLastPosition } from '../db/documents.js'
 import { getFolder } from '../db/folders.js'
 import { addDocumentToFolder, listAllDocumentFolders, listFolderIdsForDocument, removeDocumentFromFolder } from '../db/documentFolders.js'
 import { getChunksForDocument } from '../db/chunks.js'
@@ -119,7 +119,7 @@ documentsRouter.get('/', async (req, res) => {
   const withChunkCounts = await Promise.all(
     // pageLayout (per-word PDF bounding boxes) is left out: it made this
     // list ~14MB across a few dozen PDFs, and only GET /:id's Reader uses it.
-    all.map(async ({ doc: { pageLayout: _pageLayout, ...doc }, isOwner }) => {
+    all.map(async ({ doc: { pageLayout: _pageLayout, pageLayoutKey: _pageLayoutKey, ...doc }, isOwner }) => {
       const chunks = await getChunksForDocument(doc.id)
       return {
         ...doc,
@@ -142,15 +142,18 @@ documentsRouter.get('/:id', async (req, res) => {
   }
 
   const isOwner = document.ownerId === req.user!.id
-  const [chunks, voice, folderIds] = await Promise.all([
+  const [chunks, voice, folderIds, pageLayout] = await Promise.all([
     getChunksForDocument(document.id),
     document.voiceId ? getVoice(document.voiceId) : Promise.resolve(null),
     isOwner ? listFolderIdsForDocument(document.id) : Promise.resolve([]),
+    loadPageLayout(document),
   ])
 
+  const { pageLayoutKey: _pageLayoutKey, ...documentFields } = document
   res.json({
     document: {
-      ...document,
+      ...documentFields,
+      pageLayout,
       isOwner,
       folderIds,
       chunksTotal: chunks.length,
@@ -334,9 +337,9 @@ documentsRouter.delete('/:id', async (req, res) => {
   // Best-effort: a storage object already missing (or a transient bucket
   // error) shouldn't block removing the document itself.
   await Promise.all(
-    [document.originalFileKey, mergedAudioKeyFor(document.id), ...audioKeys].map((key) =>
-      deleteObject(key).catch((err) => console.error(`Failed to delete storage object ${key}:`, err)),
-    ),
+    [document.originalFileKey, mergedAudioKeyFor(document.id), document.pageLayoutKey, ...audioKeys]
+      .filter((key): key is string => key !== null)
+      .map((key) => deleteObject(key).catch((err) => console.error(`Failed to delete storage object ${key}:`, err))),
   )
 
   await deleteDocument(document.id)

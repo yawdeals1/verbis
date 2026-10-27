@@ -1,3 +1,4 @@
+import { getObjectBuffer, putObject } from '../storage/index.js'
 import { deleteRow, getRow, insertRow, listRows, updateRow } from './studioClient.js'
 import type { DocumentRow, DocumentStatus, LastPosition, SourceType } from './types.js'
 
@@ -16,6 +17,7 @@ function mapRow(row: Record<string, unknown>): DocumentRow {
     lastPosition: (row.last_position as LastPosition | null) ?? null,
     summary: (row.summary as string | null) ?? null,
     pageLayout: (row.page_layout as DocumentRow['pageLayout']) ?? null,
+    pageLayoutKey: (row.page_layout_key as string | null) ?? null,
     createdAt: new Date(row.created_at as string).toISOString(),
   }
 }
@@ -66,8 +68,26 @@ export async function updateSummary(id: string, summary: string): Promise<void> 
   await updateRow(TABLE, id, { summary })
 }
 
-export async function updatePageLayout(id: string, pageLayout: DocumentRow['pageLayout']): Promise<void> {
-  await updateRow(TABLE, id, { page_layout: pageLayout })
+export function pageLayoutKeyFor(documentId: string): string {
+  return `layouts/${documentId}.json`
+}
+
+/**
+ * The layout goes to storage, not the page_layout column: the Studio API
+ * rejects request bodies over ~1MB (as a bare 500 "Update failed"), and a
+ * 30-page PDF's per-word boxes already serialize to ~2MB.
+ */
+export async function updatePageLayout(id: string, pageLayout: NonNullable<DocumentRow['pageLayout']>): Promise<void> {
+  const key = pageLayoutKeyFor(id)
+  await putObject(key, Buffer.from(JSON.stringify(pageLayout)), 'application/json')
+  await updateRow(TABLE, id, { page_layout_key: key })
+}
+
+/** Inline page_layout is only set on PDFs imported before layouts moved to storage. */
+export async function loadPageLayout(document: DocumentRow): Promise<DocumentRow['pageLayout']> {
+  if (document.pageLayout) return document.pageLayout
+  if (!document.pageLayoutKey) return null
+  return JSON.parse((await getObjectBuffer(document.pageLayoutKey)).toString('utf8'))
 }
 
 /** Deletes the document row — chunks cascade via the DB's ON DELETE CASCADE FK. Storage cleanup (original file, chunk audio) is the caller's responsibility, since that lives outside the DB. */

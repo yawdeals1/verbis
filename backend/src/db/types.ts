@@ -49,6 +49,8 @@ export interface DocumentRow {
   summary: string | null
   /** PDF-only: per-word bounding boxes for the real-PDF-rendering reader view. Null for non-PDF sources and for PDFs imported before this existed. */
   pageLayout: Pick<PdfLayout, 'pages' | 'words'> | null
+  /** Storage key of the PDF layout JSON; see loadPageLayout for how it relates to pageLayout. */
+  pageLayoutKey: string | null
   createdAt: string
 }
 
