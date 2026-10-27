@@ -7,6 +7,8 @@ COPY src ./src
 RUN npm run build
 
 FROM node:22-alpine AS runner
+# Encodes OpenRouter's raw PCM speech to MP3 (services/openrouter.ts).
+RUN apk add --no-cache ffmpeg
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./

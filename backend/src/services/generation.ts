@@ -1,4 +1,4 @@
-import { synthesizeChunk } from './tts.js'
+import { activeProvider, synthesizeChunk } from './tts.js'
 import { putObject } from '../storage/index.js'
 import { markChunkError, markChunkReady } from '../db/chunks.js'
 import { updateDocumentStatus } from '../db/documents.js'
@@ -29,7 +29,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  * Confirmed against a live 429: `{"code":"concurrency_limit_reached",
  * "message":"...your plan allows 1 simultaneous requests..."}` — the
  * Speechify plan in use caps concurrency at exactly 1, so this can't be
- * raised without a plan change.
+ * raised without a plan change. OpenRouter's free HeyGen model served six
+ * simultaneous requests without a 429 when tested, so it gets more room.
  */
 class Semaphore {
   private available: number
@@ -58,7 +59,7 @@ class Semaphore {
   }
 }
 
-const TTS_CONCURRENCY = 1
+const TTS_CONCURRENCY = activeProvider() === 'openrouter' ? 4 : 1
 const ttsSemaphore = new Semaphore(TTS_CONCURRENCY)
 
 /**

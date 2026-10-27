@@ -1,11 +1,12 @@
 import { env } from '../config/env.js'
 import * as elevenlabs from './elevenlabs.js'
+import * as openrouter from './openrouter.js'
 import * as speechify from './speechify.js'
 import type { SynthesizeResult, TtsBackend, VoiceOption } from './ttsTypes.js'
 
 export type { SynthesizeResult, VoiceOption }
 
-export type TtsProvider = 'speechify' | 'elevenlabs'
+export type TtsProvider = 'speechify' | 'elevenlabs' | 'openrouter'
 
 /**
  * Single seam between the pipeline and whichever TTS backend is active.
@@ -20,6 +21,7 @@ export type TtsProvider = 'speechify' | 'elevenlabs'
 const providers: Record<TtsProvider, TtsBackend> = {
   speechify,
   elevenlabs,
+  openrouter,
 }
 
 export function activeProvider(): TtsProvider {

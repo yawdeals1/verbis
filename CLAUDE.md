@@ -12,12 +12,12 @@ A personal read-aloud app: import a PDF/DOCX or a photo of a book page, get it r
 - **Backend**: Node/Express, self-hosted on Deploro VPS compute (needed for `@google-cloud/vision`, `jsdom`, and local-disk storage, none of which run on Deploro's Cloudflare Worker path).
 - **Database**: Deploro's per-project Studio REST API (`backend/src/db/studioClient.ts`), not a direct Postgres connection — same for local dev and production, both point at the same Deploro-hosted `verbis` project via `DEPLORO_API_URL`/`DEPLORO_API_TOKEN`.
 - **File/audio storage**: Deploro project storage (R2) via its HTTP storage API, selected by `DEPLORO_STORAGE_URL` (`backend/src/storage/deploroStorage.ts`). Falls through to an S3-compatible bucket when the `S3_*` vars are set, then to local disk (`backend/storage/`) when neither is (`backend/src/storage/index.ts`).
-- **TTS**: Speechify (`POST /v1/audio/speech`, default) or ElevenLabs (`/v1/text-to-speech/{voice_id}/with-timestamps`), selected by `TTS_PROVIDER`. Both return the same character-anchored word timings, so previously generated audio stays valid across a switch.
+- **TTS**: Speechify (`POST /v1/audio/speech`, default) or ElevenLabs (`/v1/text-to-speech/{voice_id}/with-timestamps`), or OpenRouter (`heygen/heygen-voice-1-turbo:free` via `POST /api/v1/audio/speech`, `TTS_PROVIDER=openrouter`), selected by `TTS_PROVIDER`. Speechify and ElevenLabs return real character-anchored word timings; OpenRouter returns raw PCM audio only, so it's encoded to MP3 with ffmpeg and its word timings are *estimated* from the audio (`services/estimatedTiming.ts`: pauses anchored to punctuation, words interpolated between). All three produce the same `WordTiming[]` shape, so previously generated audio stays valid across a switch.
 - **OCR**: Google Cloud Vision, Document Text Detection mode.
 - **Summarization/Q&A (Phase 4)**: local Ollama model (default `gemma4`, configurable via `OLLAMA_MODEL`) — no API key, no per-token billing.
 - **Auth**: Deploro Auth-as-a-Service (`email_password` provider on the `verbis` project), proxied server-to-server — see below.
 
-No other providers should be introduced for these roles without discussing it first — each was chosen deliberately (see `PRODUCT_PLAN.md` §2) and swapping one has knock-on effects (e.g. both TTS backends must keep returning character-anchored word timing, since the highlighting feature depends on it).
+No other providers should be introduced for these roles without discussing it first — each was chosen deliberately (see `PRODUCT_PLAN.md` §2) and swapping one has knock-on effects (e.g. every TTS backend must produce character-anchored word timing, since the highlighting feature depends on it — real timing from the provider where it exists, `estimatedTiming.ts` where it doesn't).
 
 ## Auth & Access Model
 
@@ -59,6 +59,7 @@ Follow the phase order in `PRODUCT_PLAN.md` §5 — don't jump ahead to Phase 2 
 
 ## Known Open Risks
 
+- OpenRouter word timing is estimated, not measured. Against Whisper on two test passages (65s and 45s), the median error was ~0.15–0.23s with 90% of words within ~0.5s. Whisper's own timestamps are only good to ~±0.2s, so treat those figures as rough. Its pause thresholds (`LONG_PAUSE_MS` etc.) were tuned on HeyGen. Re-measure them if `OPENROUTER_TTS_MODEL` changes.
 - OCR accuracy on real handheld book photos is unvalidated — test against real varied-lighting/angle photos early in Phase 2, don't assume Cloud Vision's quoted accuracy holds.
 - Chunking granularity (sentence vs. paragraph) trades off API call volume against highlight/seek smoothness — worth prototyping both before locking in.
 - ElevenLabs free tier is ~10K characters/month — track usage once past prototyping, this will be exceeded fast. Speechify is metered per character too; same tracking applies if it becomes the primary backend long-term.

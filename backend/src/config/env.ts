@@ -65,11 +65,13 @@ export const env = {
   // its speech marks carry per-word character offsets and times in the same
   // response as the audio, which is what synced highlighting needs. Set to
   // `elevenlabs` to switch; both produce the same character-anchored timing,
-  // so previously generated audio stays valid either way.
-  get ttsProvider(): 'speechify' | 'elevenlabs' {
+  // so previously generated audio stays valid either way. `openrouter`
+  // returns audio with no timing at all, so its word timing is estimated
+  // from the audio (services/estimatedTiming.ts) — close, but not exact.
+  get ttsProvider(): 'speechify' | 'elevenlabs' | 'openrouter' {
     const value = optional('TTS_PROVIDER') ?? 'speechify'
-    if (value !== 'speechify' && value !== 'elevenlabs') {
-      throw new Error(`Invalid TTS_PROVIDER: ${value}. Expected 'speechify' or 'elevenlabs'.`)
+    if (value !== 'speechify' && value !== 'elevenlabs' && value !== 'openrouter') {
+      throw new Error(`Invalid TTS_PROVIDER: ${value}. Expected 'speechify', 'elevenlabs' or 'openrouter'.`)
     }
     return value
   },
@@ -99,6 +101,16 @@ export const env = {
   get elevenLabsModelId() {
     return optional('ELEVENLABS_MODEL_ID') ?? 'eleven_multilingual_v2'
   },
+  get openRouterApiKey() {
+    return required('OPENROUTER_API_KEY')
+  },
+  // Chosen over fish-audio/s2.1-pro-free:free after testing both on a
+  // full-size chunk: ~7s vs ~29s to synthesize, and HeyGen offers named
+  // voices for the picker where Fish Audio lists none.
+  get openRouterTtsModel() {
+    return optional('OPENROUTER_TTS_MODEL') ?? 'heygen/heygen-voice-1-turbo:free'
+  },
+
   // `GOOGLE_APPLICATION_CREDENTIALS` (a file path) works for local dev where
   // the key file sits on disk. Deploro's `vps set-env` can only set string
   // env vars, not upload a file — so in that environment, set
